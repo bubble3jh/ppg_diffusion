@@ -1,3 +1,4 @@
+import os
 import math
 from pathlib import Path
 from random import random
@@ -789,7 +790,6 @@ class Trainer1D(object):
         # dataset and dataloader
 
         dl = DataLoader(dataset, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = 0)
-
         dl = self.accelerator.prepare(dl)
         self.dl = cycle(dl)
 
@@ -804,7 +804,8 @@ class Trainer1D(object):
             self.ema.to(self.device)
 
         self.results_folder = Path(results_folder)
-        self.results_folder.mkdir(exist_ok = True)
+        os.makedirs(self.results_folder, exist_ok=True)
+        # self.results_folder.mkdir(exist_ok = True)
 
         # step counter state
 
@@ -863,16 +864,14 @@ class Trainer1D(object):
 
                 total_loss = 0.
 
-                for _ in range(self.gradient_accumulate_every):
+                for i, _ in enumerate(range(self.gradient_accumulate_every)):
                     data = next(self.dl).to(device)
-
                     with self.accelerator.autocast():
                         loss = self.model(data)
                         loss = loss / self.gradient_accumulate_every
                         total_loss += loss.item()
 
                     self.accelerator.backward(loss)
-
                 accelerator.clip_grad_norm_(self.model.parameters(), 1.0)
                 pbar.set_description(f'loss: {total_loss:.4f}')
 
@@ -893,13 +892,13 @@ class Trainer1D(object):
                         with torch.no_grad():
                             milestone = self.step // self.save_and_sample_every
                             batches = num_to_groups(self.num_samples, self.batch_size)
+                            
                             all_samples_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n), batches))
 
                         all_samples = torch.cat(all_samples_list, dim = 0)
 
-                        torch.save(all_samples, str(self.results_folder / f'sample-{milestone}.png'))
+                        # torch.save(all_samples, str(self.results_folder / f'sample-{milestone}.png'))
                         self.save(milestone)
 
                 pbar.update(1)
-
         accelerator.print('training complete')
