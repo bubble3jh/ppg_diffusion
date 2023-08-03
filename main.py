@@ -64,8 +64,6 @@ def main(args):
         objective = 'pred_v'
     )
 
-    dataset = Dataset1D(training_seq)
-
     result_path = os.path.join(paths.WEIGHT_ROOT, train_setting)
     # trainer = Trainer1D(
     #     diffusion,
