@@ -21,7 +21,7 @@ from ema_pytorch import EMA
 
 from tqdm.auto import tqdm
 from denoising_diffusion_pytorch.version import __version__
-
+from typing import Optional
 # constants
 
 ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])
@@ -71,15 +71,45 @@ def unnormalize_to_zero_to_one(t):
 # data
 
 class Dataset1D(Dataset):
-    def __init__(self, tensor: Tensor):
+    def __init__(self, tensor: torch.Tensor, normalize: bool = False):
         super().__init__()
         self.tensor = tensor.clone()
+        self.normalize = normalize
+        # Calculate min and max if normalization is required
+        if self.normalize:
+            self.tensor_min = torch.min(self.tensor)
+            self.tensor_max = torch.max(self.tensor)
+            self.tensor = self._min_max_normalize(self.tensor)
 
     def __len__(self):
         return len(self.tensor)
 
     def __getitem__(self, idx):
         return self.tensor[idx].clone()
+
+    def _min_max_normalize(self, tensor):
+        return (tensor - self.tensor_min) / (self.tensor_max - self.tensor_min)
+
+    def undo_normalization(self, tensor: Optional[torch.Tensor] = None):
+        """
+        This method undoes the min-max normalization on the input tensor
+        If no tensor is given, it undoes the normalization on the stored tensor
+        """
+        if tensor is None:
+            tensor = self.tensor
+
+        return tensor * (self.tensor_max - self.tensor_min) + self.tensor_min
+
+# class Dataset1D(Dataset):
+#     def __init__(self, tensor: Tensor):
+#         super().__init__()
+#         self.tensor = tensor.clone()
+
+#     def __len__(self):
+#         return len(self.tensor)
+
+#     def __getitem__(self, idx):
+#         return self.tensor[idx].clone()
 
 # small helper modules
 
@@ -419,7 +449,8 @@ class GaussianDiffusion1D(nn.Module):
         objective = 'pred_noise',
         beta_schedule = 'cosine',
         ddim_sampling_eta = 0.,
-        auto_normalize = True
+        normalized = False,
+        denorm_func = None
     ):
         super().__init__()
         self.model = model.requires_grad_(True)
@@ -499,8 +530,10 @@ class GaussianDiffusion1D(nn.Module):
 
         # whether to autonormalize
 
-        self.normalize = normalize_to_neg_one_to_one if auto_normalize else identity
-        self.unnormalize = unnormalize_to_zero_to_one if auto_normalize else identity
+        # self.normalize = normalize_to_neg_one_to_one if auto_normalize else identity
+        # self.unnormalize = unnormalize_to_zero_to_one if auto_normalize else identity
+        self.normalize = identity if normalized else normalize_to_neg_one_to_one
+        self.unnormalize = denorm_func if normalized else unnormalize_to_zero_to_one
 
     def predict_start_from_noise(self, x_t, t, noise):
         return (

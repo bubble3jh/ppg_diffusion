@@ -47,7 +47,7 @@ def main(args):
         pickle.dump(training_seq, f)
     
 
-    dataset = Dataset1D(training_seq)
+    dataset = Dataset1D(training_seq, normalize=args.min_max)
 
     #----------------------------------- Create Model ------------------------------------
 
@@ -60,8 +60,10 @@ def main(args):
     diffusion = GaussianDiffusion1D(
         model,
         seq_length = args.seq_length,
-        timesteps = args.diffusion_time_steps,
-        objective = 'pred_v'
+        timesteps = args.diffusion_time_steps,                           
+        objective = 'pred_v',
+        normalized = args.min_max,             
+        denorm_func = dataset.undo_normalization if args.min_max else None
     )
 
     result_path = os.path.join(paths.WEIGHT_ROOT, train_setting)
@@ -86,11 +88,12 @@ def main(args):
         amp = True,                                                     # turn on mixed precision
         results_folder = result_path
     )
-    trainer.save('last')
+    
     if not args.sample_only:
         trainer.train()
-
-    # TODO: 가중치 불러오는 코드 짜기
+        trainer.save('last')
+    else:
+        trainer.load('last')
 
 
     #------------------------------------- Sampling --------------------------------------
@@ -117,9 +120,8 @@ def main(args):
         sampled_seq = diffusion.sample(batch_size = 16)
 
     os.makedirs(sampling_dir, exist_ok=True)
-    if args.save_seq:
-        with open(f'{sampling_dir}/sample.pkl', 'wb') as f:
-            pickle.dump(sampled_seq, f)
+    with open(f'{sampling_dir}/sample.pkl', 'wb') as f:
+        pickle.dump(sampled_seq, f)
     #------------------------------------- Visualize --------------------------------------
 
     if args.visualize:
@@ -142,6 +144,8 @@ if __name__ == '__main__':
     parser.add_argument("--sampling_method", type=str, default='first_k')
     parser.add_argument("--train_batch_size", type=int, default=32)
     parser.add_argument("--sample_batch_size", type=int, default=32)
+    parser.add_argument("--min_max", action='store_false',
+        help = "Min-Max normalize data (Default : True)")
 
     ## Model ---------------------------------------------------
     parser.add_argument("--reg_guidance", action='store_false',
@@ -158,10 +162,8 @@ if __name__ == '__main__':
         help = "Stop using wandb (Default : False)")
 
     ## Sampling
-    parser.add_argument("--save_seq", action='store_true',
-        help = "Stop using wandb (Default : False)")
     parser.add_argument("--sample_only", action='store_true',
-        help = "Stop using wandb (Default : False)")
+        help = "Stop Training (Default : False)")
     parser.add_argument("--sampling_batch_size", type=int, default=16)
 
     args = parser.parse_args()

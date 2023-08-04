@@ -55,28 +55,22 @@ optimizer = optim.Adam(regressor.parameters(), lr=0.001)
 timesteps, = diffusion.betas.shape
 num_timesteps = int(timesteps)
 
-loss_values = []
-for _ in tqdm(range(100), desc="Training", unit="epoch"):
-    batch = next(dl).to(device)
-    t = torch.randint(0, num_timesteps, (batch.size(0),), device=device).long()
-    label = torch.full((batch.size(0), 2), 1).to(device).float()
+with tqdm(initial = 0, total = 100) as pbar:
+    for _ in range(100):
+        batch = next(dl).to(device)
+        t = torch.randint(0, num_timesteps, (batch.size(0),), device=device).long()
+        label = torch.full((batch.size(0), 2), 1).to(device).float()
 
-    batch = diffusion.q_sample(batch, t)
+        batch = diffusion.q_sample(batch, t)
 
-    optimizer.zero_grad()
-    out = regressor(batch, t)
+        optimizer.zero_grad()
+        out = regressor(batch, t)
 
-    loss = F.mse_loss(out, label)
-    loss.backward()
-    optimizer.step()
-
-    loss_values.append(loss.item())
-
-# Print the loss values
-for i, loss in enumerate(loss_values):
-    if i % 10 == 0 :
-        print(f"Epoch {i+1}: Loss = {loss}")
-
+        loss = F.mse_loss(out, label)
+        pbar.set_description(f'loss: {loss:.4f}')
+        loss.backward()
+        optimizer.step()
+        pbar.update(1)
 torch.save(regressor.state_dict(), model_path)
 
         

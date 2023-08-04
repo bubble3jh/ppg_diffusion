@@ -23,8 +23,8 @@ class Classifier(nn.Module):
 class Regressor(nn.Module):
     def __init__(self, seq_len, num_classes=2, t_dim=1) -> None:
         super().__init__()
-        self.linear_t = nn.Linear(t_dim, num_classes)  # output dimension is now 2 for regression
-        self.linear_seq = nn.Linear(seq_len, num_classes)  # input dimension is now seq_len, output is 2
+        self.linear_t = nn.Linear(t_dim, num_classes) 
+        self.linear_seq = nn.Linear(seq_len, num_classes)  
 
     def forward(self, x, t):
         """
