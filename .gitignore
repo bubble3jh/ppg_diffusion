@@ -133,3 +133,5 @@ dmypy.json
 
 # CUSTOM
 wandb/
+clf_model/
+reg_model/

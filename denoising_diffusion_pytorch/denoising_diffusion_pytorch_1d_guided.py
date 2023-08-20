@@ -28,6 +28,23 @@ ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])
 
 # helpers functions
 
+def expand_last_dimension(tensor, method="extrapolate", extra_num=5):
+    if method == "expand":
+        last_value = tensor[:, :, -1:]
+    elif method == "extrapolate":
+        last_values = tensor[:, :, -extra_num:]
+        last_value = linear_extrapolation(last_values, extra_num)
+    return torch.cat((tensor, last_value), dim=-1)
+
+def linear_extrapolation(last_values, extra_num=5):
+    x = torch.arange(1, extra_num + 1, dtype=torch.float32).reshape(1, 1, -1).to("cuda")
+    slope = (extra_num * (x * last_values).sum(dim=-1) - x.sum() * last_values.sum(dim=-1)) / \
+            (extra_num * (x ** 2).sum() - (x.sum()) ** 2)
+    intercept = (last_values.sum(dim=-1) - slope * x.sum()) / extra_num
+
+    extrapolated_value = slope * (extra_num + 1) + intercept
+    return extrapolated_value.unsqueeze(-1)
+
 def exists(x):
     return x is not None
 
@@ -71,24 +88,33 @@ def unnormalize_to_zero_to_one(t):
 # data
 
 class Dataset1D(Dataset):
-    def __init__(self, tensor: torch.Tensor, normalize: bool = False):
+    def __init__(self, tensor: torch.Tensor, label: torch.Tensor = None, normalize: bool = False):
         super().__init__()
         self.tensor = tensor.clone()
         self.normalize = normalize
+        if label != None:
+            label = label.permute(1, 0, 2)
+            self.label = label.squeeze()
+            if self.normalize:
+                self.label_min = torch.min(self.label, dim=0)[0]
+                self.label_max = torch.max(self.label, dim=0)[0]
+                self.label = self._min_max_normalize(self.label, self.label_max, self.label_min)
         # Calculate min and max if normalization is required
         if self.normalize:
             self.tensor_min = torch.min(self.tensor)
             self.tensor_max = torch.max(self.tensor)
-            self.tensor = self._min_max_normalize(self.tensor)
+            self.tensor = self._min_max_normalize(self.tensor, self.tensor_max, self.tensor_min)
 
     def __len__(self):
         return len(self.tensor)
 
     def __getitem__(self, idx):
-        return self.tensor[idx].clone()
-
-    def _min_max_normalize(self, tensor):
-        return (tensor - self.tensor_min) / (self.tensor_max - self.tensor_min)
+        if self.label != None:
+            return self.tensor[idx].clone(), self.label[idx].clone()
+        else:
+            return self.tensor[idx].clone()
+    def _min_max_normalize(self, tensor, _max, _min):
+        return (tensor - _min) / (_max - _min)
 
     def undo_normalization(self, tensor: Optional[torch.Tensor] = None):
         """
@@ -99,6 +125,16 @@ class Dataset1D(Dataset):
             tensor = self.tensor
 
         return tensor * (self.tensor_max - self.tensor_min) + self.tensor_min
+
+    def undo_normalization_label(self, label: Optional[torch.Tensor] = None):
+        """
+        This method undoes the min-max normalization on the input tensor
+        If no tensor is given, it undoes the normalization on the stored tensor
+        """
+        if label is None:
+            label = self.label
+
+        return label * (self.label_max - self.label_min) + self.label_min
 
 # class Dataset1D(Dataset):
 #     def __init__(self, tensor: Tensor):
@@ -395,7 +431,21 @@ class Unet1D(nn.Module):
         x = self.mid_attn(x)
         x = self.mid_block2(x, t)
 
-        for block1, block2, attn, upsample in self.ups:
+        # for block1, block2, attn, upsample in self.ups:
+        #     x = torch.cat((x, h.pop()), dim = 1)
+        #     x = block1(x, t)
+
+        #     x = torch.cat((x, h.pop()), dim = 1)
+        #     x = block2(x, t)
+        #     x = attn(x)
+
+        #     x = upsample(x)
+
+        for idx, (block1, block2, attn, upsample) in enumerate(self.ups):
+
+            # Check if it's the last upsample step
+            if idx == len(self.ups) - 1:
+                x = expand_last_dimension(x)
             x = torch.cat((x, h.pop()), dim = 1)
             x = block1(x, t)
 
@@ -404,6 +454,8 @@ class Unet1D(nn.Module):
             x = attn(x)
 
             x = upsample(x)
+            
+
 
         x = torch.cat((x, r), dim = 1)
 
@@ -776,7 +828,7 @@ class Trainer1D(object):
         ema_update_every = 10,
         ema_decay = 0.995,
         adam_betas = (0.9, 0.99),
-        save_and_sample_every = 1000,
+        save_and_sample_every = 100000,
         num_samples = 25,
         results_folder = './results',
         amp = False,
@@ -886,7 +938,9 @@ class Trainer1D(object):
                 total_loss = 0.
 
                 for i, _ in enumerate(range(self.gradient_accumulate_every)):
-                    data = next(self.dl).to(device)
+                    # data = next(self.dl).to(device)
+                    data, _ = next(self.dl)
+                    data = data.to(device)
                     with self.accelerator.autocast():
                         loss = self.model(data)
                         loss = loss / self.gradient_accumulate_every
