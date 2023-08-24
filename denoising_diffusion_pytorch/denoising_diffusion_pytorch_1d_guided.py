@@ -88,13 +88,13 @@ def unnormalize_to_zero_to_one(t):
 # data
 
 class Dataset1D(Dataset):
-    def __init__(self, tensor: torch.Tensor, label: torch.Tensor = None, normalize: bool = False):
+    def __init__(self, tensor: torch.Tensor, label: torch.Tensor = None, groups: torch.Tensor = None, normalize: bool = False):
         super().__init__()
         self.tensor = tensor.clone()
+        self.groups = groups
         self.normalize = normalize
         if label != None:
-            label = label.permute(1, 0, 2)
-            self.label = label.squeeze()
+            self.label = label
             if self.normalize:
                 self.label_min = torch.min(self.label, dim=0)[0]
                 self.label_max = torch.max(self.label, dim=0)[0]
@@ -109,8 +109,8 @@ class Dataset1D(Dataset):
         return len(self.tensor)
 
     def __getitem__(self, idx):
-        if self.label != None:
-            return self.tensor[idx].clone(), self.label[idx].clone()
+        if self.label != None and self.groups != None:
+            return self.tensor[idx].clone(), self.label[idx].clone(), self.groups[idx].clone()
         else:
             return self.tensor[idx].clone()
     def _min_max_normalize(self, tensor, _max, _min):
@@ -939,7 +939,7 @@ class Trainer1D(object):
 
                 for i, _ in enumerate(range(self.gradient_accumulate_every)):
                     # data = next(self.dl).to(device)
-                    data, _ = next(self.dl)
+                    data, _, _  = next(self.dl)
                     data = data.to(device)
                     with self.accelerator.autocast():
                         loss = self.model(data)

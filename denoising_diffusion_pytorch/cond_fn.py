@@ -16,7 +16,7 @@ def classifier_cond_fn(x, t, classifier, y, classifier_scale=1):
         return grad
     
     # added
-def regressor_cond_fn(x, t, regressor, y, regressor_scale=1):
+def regressor_cond_fn(x, t, regressor, y, g, regressor_scale=1):
     """
     return the gradient of the MSE of the regressor output and y wrt x.
     formally expressed as d_mse(regressor(x, t), y) / dx
@@ -24,7 +24,7 @@ def regressor_cond_fn(x, t, regressor, y, regressor_scale=1):
     assert y is not None
     with torch.enable_grad():
         x_in = x.detach().requires_grad_(True)
-        predictions, _ = regressor(x_in, t)
+        predictions, _ = regressor(x_in, t, g)
         mse = ((predictions - y) ** 2).mean()
         grad = torch.autograd.grad(mse, x_in)[0] * regressor_scale
         return grad

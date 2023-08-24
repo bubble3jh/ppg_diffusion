@@ -127,6 +127,8 @@ class Unet1DEncoder(nn.Module):
             nn.GELU(),
             nn.Linear(time_dim, time_dim)
         )
+        num_groups=6
+        self.group_emb = nn.Embedding(num_groups, time_dim)
         self.out_mlp = MLPRegressor(dims[-1], dims[-1], 2, pool=pool)
 
         # layers
@@ -139,31 +141,33 @@ class Unet1DEncoder(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
+                block_klass(dim_in, dim_in, time_emb_dim = time_dim * 2),
+                block_klass(dim_in, dim_in, time_emb_dim = time_dim * 2),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in))),
                 Downsample(dim_in, dim_out) if not is_last else nn.Conv1d(dim_in, dim_out, 3, padding = 1)
             ]))
 
         mid_dim = dims[-1]
-        self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim * 2) # time_emb_dim = time_dim
         self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim)))
-        self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim * 2)
 
-    def forward(self, x, time, x_self_cond = None):
+    def forward(self, x, time, group, x_self_cond = None):
         if self.self_condition:
             x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
             x = torch.cat((x_self_cond, x), dim = 1)
         x = self.init_conv(x)
         t = self.time_mlp(time)
+        g = self.group_emb(group)
+        tg = torch.cat((t, g), dim=-1)
         for block1, block2, attn, downsample in self.downs:
-            x = block1(x, t)
-            x = block2(x, t)
+            x = block1(x, tg)
+            x = block2(x, tg)
             x = attn(x)
             x = downsample(x)
 
-        x = self.mid_block1(x, t)
+        x = self.mid_block1(x, tg)
         x = self.mid_attn(x)
-        emb = self.mid_block2(x, t)
+        emb = self.mid_block2(x, tg)
 
         return self.out_mlp(emb), emb
