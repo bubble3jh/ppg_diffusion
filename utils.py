@@ -167,7 +167,7 @@ def fold_data(fold_nums):
     print(f"{count} datas eliminated.\n")
     return torch.cat(ppgs, dim=0).unsqueeze(1).half(), torch.stack(spdps, dim=0).float(), torch.tensor(group_labels)
 
-def load_fold_np(fold_num, root='/data1/bubble3jh/ppg/data/bcg_dataset'):
+def load_fold_np(fold_num, root='../data/bcg_dataset'):
     if os.path.exists(f'{root}/signal_fold_{fold_num}_ppg.npy'):
         return torch.from_numpy(np.load(f'{root}/signal_fold_{fold_num}_ppg.npy')), torch.from_numpy(np.load(f'{root}/signal_fold_{fold_num}_spdp.npy'))
     else:

@@ -132,6 +132,7 @@ def main(args):
     #------------------------------------- Sampling --------------------------------------
 
     if not args.disable_guidance:
+        print("sampling with guidance")
         y = sample_sbp_dbp(args.target_group, args.sample_batch_size)
         y = dataset._min_max_normalize(y, dataset.label_max, dataset.label_min).to(device)
         sampled_seq = diffusion.sample(
