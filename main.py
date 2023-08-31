@@ -8,8 +8,59 @@ import pandas as pd
 from denoising_diffusion_pytorch.model import Classifier, Regressor, Unet1DEncoder
 from denoising_diffusion_pytorch.cond_fn import classifier_cond_fn, regressor_cond_fn
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch_1d_guided import Unet1D, GaussianDiffusion1D, Trainer1D, Dataset1D
-from utils import visualize, sample_sbp_dbp, get_data
+from utils import visualize, sample_sbp_dbp, get_data, get_sample_batch_size
 import paths
+
+def generate_diffusion_sequence(args, data, dataset, device, diffusion, regressor_cond_fn, regressor, sampling_dir, target_group):
+    sample_batch_size = args.sample_batch_size if args.sample_batch_size is not None else get_sample_batch_size(data, target_group)
+    if sample_batch_size == 0:
+        os.makedirs(sampling_dir, exist_ok=True)
+        with open(f'{sampling_dir}/skipped_{target_group}.pkl', 'wb') as f:
+            pickle.dump([], f)  
+        return
+    micro_batch_size = 256  # TODO: 적절한 micro batch size 찾기 OOM 회피 위함.
+    num_loops = (sample_batch_size + micro_batch_size - 1) // micro_batch_size  
+
+    sampled_seq_list = []; ori_y_list = []
+
+    for i in range(num_loops):
+        current_batch_size = min(micro_batch_size, sample_batch_size - i * micro_batch_size)
+        
+        ori_y = sample_sbp_dbp(target_group, current_batch_size)
+        y = dataset._min_max_normalize(ori_y, dataset.label_max, dataset.label_min).to(device)
+
+        sampled_seq = diffusion.sample(
+            batch_size=current_batch_size,
+            return_all_timesteps=False,
+            cond_fn=regressor_cond_fn,
+            guidance_kwargs={
+                "regressor": regressor,
+                "y": y,
+                "g": torch.fill(torch.zeros(current_batch_size,), target_group).long().to(device),
+                "regressor_scale": args.regressor_scale,
+            }
+        )
+        ori_y_list.append(ori_y)
+        sampled_seq_list.append(sampled_seq)
+    try:
+        # torch.cat 호출 부분
+        os.makedirs(sampling_dir, exist_ok=True)
+        # with open(f'{sampling_dir}/sample_{target_group}.pkl', 'wb') as f:
+        #     pickle.dump(torch.cat(sampled_seq_list, dim=0), f)
+        result = {
+            'sampled_seq': torch.cat(sampled_seq_list, dim=0),
+            'y': torch.cat(ori_y_list, dim=0)
+        }
+        print(f"Sampling completed for target group {target_group}\nat {sampling_dir}")
+        with open(f'{sampling_dir}/sample_{target_group}.pkl', 'wb') as f:
+            pickle.dump(result, f)
+            
+    except RuntimeError as e:
+        # 문제가 발생했음을 알리는 파일 생성
+        os.makedirs(sampling_dir, exist_ok=True)
+        with open(f'{sampling_dir}/error_{target_group}.txt', 'w') as error_file:
+            error_file.write(str(e))
+        print(f"An error occurred with target_group {target_group}: {e}")
 
 def main(args):
     if args.device == 'cuda' and torch.cuda.is_available():
@@ -33,7 +84,7 @@ def main(args):
     sampling_root = paths.SAMPLING_ROOT
     if not args.disable_guidance:
         train_setting = train_setting + "_guided"
-    sampling_name = train_setting + f'_sampling_batch_size_{args.sampling_batch_size}'
+    sampling_name = train_setting + f'_train_lr_{args.train_lr}_reg_sel_{args.reg_model_sel}'
     sampling_dir = os.path.join(sampling_root, sampling_name)
 
     #------------------------------------ Load Data --------------------------------------
@@ -51,7 +102,7 @@ def main(args):
                                     num_samples=5,
                                     data_root=paths.DATA_ROOT,
                                     benchmark='bcg',
-                                    train_fold=0)
+                                    train_fold=args.train_fold)
     data_sampling_time = time.time() - data_sampling_start
     if not args.ignore_wandb:
         wandb.log({'n_sample': args.num_samples})
@@ -93,17 +144,21 @@ def main(args):
         channels = 1
     ).to(device)
     if args.train_fold == 0:
-        best_eta=0.0; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
-    elif args.train_fold == 1:
-        best_eta=0.001; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
-    elif args.train_fold == 2:
         best_eta=0.01; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
+    elif args.train_fold == 1:
+        best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
+    elif args.train_fold == 2:
+        best_eta=0.0; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
     elif args.train_fold == 3:
         best_eta=0.0; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
     elif args.train_fold == 4:
         best_eta=0.0; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
 
-    model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_eta_{best_eta}_lr_{best_lr}.pt" # best model로 변경
+    if args.reg_model_sel == "train":
+        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_eta_{best_eta}_lr_{best_lr}.pt" # test best model로 변경
+    elif args.reg_model_sel == "val":
+        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_eta_{best_eta}_lr_{best_lr}_val.pt" # test best model로 변경
+        
     if not args.disable_guidance:
         model_state_dict = torch.load(model_path)['model_state_dict']
         regressor.load_state_dict(model_state_dict)
@@ -133,26 +188,16 @@ def main(args):
 
     if not args.disable_guidance:
         print("sampling with guidance")
-        y = sample_sbp_dbp(args.target_group, args.sample_batch_size)
-        y = dataset._min_max_normalize(y, dataset.label_max, dataset.label_min).to(device)
-        sampled_seq = diffusion.sample(
-        batch_size = args.sample_batch_size,
-        return_all_timesteps = False,
-        cond_fn = regressor_cond_fn,
-        guidance_kwargs={
-            "regressor":regressor,
-            # "y":torch.fill(torch.zeros(args.sample_batch_size, 2), args.target_label).long().to(device), 
-            "y":y,
-            "g":torch.fill(torch.zeros(args.sample_batch_size,), args.target_group).long().to(device),
-            "regressor_scale":args.regressor_scale,
-        }
-    )
+        if args.target_group == -1:
+            for target_group in [0,1,2,3,4]:
+                generate_diffusion_sequence(args, data, dataset, device, diffusion, regressor_cond_fn, regressor, sampling_dir, target_group)
+        else:
+            generate_diffusion_sequence(args, data, dataset, device, diffusion, regressor_cond_fn, regressor, sampling_dir, args.target_group)
     else:
-        sampled_seq = diffusion.sample(batch_size = 16)
-
-    os.makedirs(sampling_dir, exist_ok=True)
-    with open(f'{sampling_dir}/sample_{args.target_group}.pkl', 'wb') as f:
-        pickle.dump(sampled_seq, f)
+        sampled_seq = diffusion.sample(batch_size = 16) #TODO: hard coding
+        os.makedirs(sampling_dir, exist_ok=True)
+        with open(f'{sampling_dir}/sample_{target_group}.pkl', 'wb') as f:
+            pickle.dump(sampled_seq, f)
     print(f"Data sampled at {sampling_dir}")
     #------------------------------------- Visualize --------------------------------------
 
@@ -175,7 +220,6 @@ if __name__ == '__main__':
     parser.add_argument("--seq_length", type=int, default=625)
     parser.add_argument("--sampling_method", type=str, default='first_k')
     parser.add_argument("--train_batch_size", type=int, default=32)
-    parser.add_argument("--sample_batch_size", type=int, default=32)
     parser.add_argument("--min_max", action='store_false',
         help = "Min-Max normalize data (Default : True)")
     parser.add_argument("--benchmark", type=str, default='bcg')
@@ -184,6 +228,7 @@ if __name__ == '__main__':
     ## Model ---------------------------------------------------
     parser.add_argument("--disable_guidance", action='store_true',
         help = "Stop using guidance (Default : False)")
+    parser.add_argument("--reg_model_sel", type=str, default='train')
 
     ## Training ------------------------------------------------
     parser.add_argument("--diffusion_time_steps", type=int, default=2000)
@@ -197,10 +242,10 @@ if __name__ == '__main__':
     ## Sampling ------------------------------------------------
     parser.add_argument("--sample_only", action='store_true',
         help = "Stop Training (Default : False)")
-    parser.add_argument("--sampling_batch_size", type=int, default=16)
+    parser.add_argument("--sample_batch_size", default=None)
     # parser.add_argument("--target_label", type=float, default=1) # deprecated
-    parser.add_argument("--target_group", type=int, default=1, choices=[0,1,2,3,4], 
-                        help="0(hyp0) 1(normal) 2(perhyper) 3(hyper2) 4(crisis) (Default : 1 (normal))")
+    parser.add_argument("--target_group", type=int, default=-1, choices=[-1,0,1,2,3,4], 
+                        help="-1(all) 0(hyp0) 1(normal) 2(perhyper) 3(hyper2) 4(crisis) (Default : 1 (normal))")
     parser.add_argument("--t_scheduling", type=str, default="uniform",  choices=["loss-second-moment", "uniform", "train-step"])
     parser.add_argument("--regressor_scale", type=float, default=1.0)
     parser.add_argument("--regressor_epoch", type=int, default=2000)

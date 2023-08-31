@@ -1,15 +1,15 @@
 #!/bin/bash
 
-GPU_IDS=(0 3 4)  # 사용할 GPU ID 리스트
+GPU_IDS=(2 3 4 5 6 7)  # 사용할 GPU ID 리스트
 IDX=0
 
 for train_fold in 0 1 2 3 4
 do
-for train_num_steps in 8 16 32
+for train_num_steps in 16 # 8 32
 do
   for diffusion_time_steps in 2000
   do
-        for train_lr in 8e-6 8e-5 8e-4 
+        for train_lr in 8e-5 # 8e-6 8e-4 
         do
           # 현재 GPU ID 선택
           CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} /mlainas/teang1995/anaconda3/envs/PPG/bin/python main.py \

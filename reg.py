@@ -39,12 +39,11 @@ def main(args):
         args.t_scheduling, diffuse_time_step=diffuse_time_step,total_epochs=epochs, init_bias=args.init_bias, final_bias=args.final_bias
     ) 
     
-    model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/epoch_{epochs}_diffuse_{diffuse_time_step}_eta_{args.eta_min}_lr_{args.init_lr}.pt"
+    model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/epoch_{epochs}_diffuse_{diffuse_time_step}_eta_{args.eta_min}_lr_{args.init_lr}"
 
     tr_dataset = Dataset1D(data['train']['ppg'], label=data['train']['spdp'], groups=data['train']['group_label'] ,normalize=True)
     val_dataset = Dataset1D(data['valid']['ppg'], label=data['valid']['spdp'], groups=data['valid']['group_label'] ,normalize=True)
     val_every = int(len(tr_dataset) / args.train_batch_size); print(f'eval every {val_every} epochs')
-
     tr_dl = DataLoader(tr_dataset, batch_size = batch_size, shuffle = True, pin_memory = True, num_workers = 0)
     tr_dl = cycle(tr_dl)
 
@@ -59,7 +58,7 @@ def main(args):
     scheduler = CosineAnnealingLR(optimizer, T_max=args.T_max, eta_min=args.eta_min)
 
     if args.load_checkpoint:
-        checkpoint = torch.load(model_path)
+        checkpoint = torch.load(model_path+".pt")
         model_state_dict = checkpoint['model_state_dict']
         optim_state_dict = checkpoint['optimizer_state_dict']
 
@@ -73,7 +72,7 @@ def main(args):
         timesteps = diffuse_time_step,
         objective = 'pred_v'
     ).to(device)
-    best_val_loss = float('inf');val_loss=0
+    best_train_loss = float('inf');best_val_train_loss=float('inf');best_val_loss = float('inf');val_loss=0
     with tqdm(initial = 0, total = epochs) as pbar:
         for i in range(epochs):
             # Train step
@@ -95,7 +94,14 @@ def main(args):
             loss.backward()
             optimizer.step()
             scheduler.step()
-
+            # Best Train Loss Update
+            if loss < best_train_loss:
+                print(f"best train loss updated: {loss}")
+                best_train_loss = loss
+                # torch.save({
+                #     'model_state_dict': regressor.state_dict(),
+                #     'optimizer_state_dict': optimizer.state_dict()
+                # }, model_path+".pt")
             # Validation Step
             if (i + 1) % val_every == 0:
                 with torch.no_grad():
@@ -107,7 +113,11 @@ def main(args):
                         val_t, _ = schedule_sampler.sample(val_batch.size(0), device)
                         val_batch = diffusion.q_sample(val_batch, val_t)
                         val_out, val_emb = regressor(val_batch, val_t, val_g)
-                        val_loss_batch = F.mse_loss(val_out, val_spdp, reduction="none").mean()
+                        # val_loss_batch = F.mse_loss(val_out, val_spdp, reduction="none").mean()
+                        val_out = val_dataset.undo_normalization_label(val_out)
+                        val_spdp = val_dataset.undo_normalization_label(val_spdp)
+                        
+                        val_loss_batch = torch.abs(val_out - val_spdp).mean()
                         val_loss += val_loss_batch.item()
                         val_count += 1
 
@@ -116,16 +126,23 @@ def main(args):
                         wandb.log({"val_loss": val_loss})  
                     # Best Validation Loss Update
                     if val_loss < best_val_loss:
+                        print(f"best val loss updated: {val_loss}")
                         best_val_loss = val_loss
+                        best_val_train_loss = loss
                         torch.save({
                             'model_state_dict': regressor.state_dict(),
                             'optimizer_state_dict': optimizer.state_dict()
-                        }, model_path)
+                        }, model_path+"_val.pt")
             pbar.set_description(f'tr_loss: {loss:.4f} / val_loss: {val_loss:.4f} / t: {t_mean:.1f}')
             pbar.update(1)
+    torch.save({
+        'model_state_dict': regressor.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
+    }, model_path+"_last.pt")
     if not args.ignore_wandb:
-        wandb.run.summary["last_train_loss"] = loss.item()
+        wandb.run.summary["best_train_loss"] = best_train_loss
         wandb.run.summary["best_val_loss"] = best_val_loss
+        wandb.run.summary["best_val_train_loss"] = best_val_loss
 
 if __name__ == '__main__':
 
@@ -156,7 +173,7 @@ if __name__ == '__main__':
     parser.add_argument("--final_bias", type=float, default=1)
     parser.add_argument("--optim", type=str, default='adam')
     parser.add_argument("--t_scheduling", type=str, default="uniform",  choices=["loss-second-moment", "uniform", "train-step"])
-    parser.add_argument("--T_max", type=int, default=50)  
+    parser.add_argument("--T_max", type=int, default=2000)  
     parser.add_argument("--eta_min", type=float, default=0)  
 
     ## Sampling ------------------------------------------------

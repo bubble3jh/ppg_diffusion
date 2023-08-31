@@ -46,7 +46,7 @@ def sample_sbp_dbp(target_group, batch_size, mode = "sample_each"):
         dbp = np.random.uniform(120, 130, size=size)
     else:
         raise ValueError("Invalid target group")
-    print(f"Target ({target_group}) : [sbp {sbp.mean().item():.2f}, dbp {dbp.mean().item():.2f}]")
+    print(f"Target ({target_group}) Batch ({sbp.shape[0]}) : [sbp {sbp.mean().item():.2f}, dbp {dbp.mean().item():.2f}]")
     if mode == "same":
         return torch.tensor([[sbp, dbp]] * batch_size)
     return torch.tensor(np.array([sbp, dbp]).T)
@@ -179,3 +179,13 @@ def load_fold_np(fold_num, root='../data/bcg_dataset'):
         ppg_numpy_data = np.array([value for value in data_dict.values()])
         np.save(f'{root}/signal_fold_{fold_num}_ppg.npy', ppg_numpy_data)   
         return torch.from_numpy(ppg_numpy_data), torch.from_numpy(spdp_numpy_data)
+
+def get_sample_batch_size(data, target_group):
+    unique_elements, counts = torch.unique(data['train']['group_label'], return_counts=True)
+
+    max_count = torch.max(counts).item()
+    
+    target_count = counts[unique_elements == target_group].item() if target_group in unique_elements else 0
+    print(f"max count : {max_count}, target count : {target_count}")
+
+    return max_count - target_count

@@ -133,7 +133,8 @@ class Dataset1D(Dataset):
         """
         if label is None:
             label = self.label
-
+        self.label_max = self.label_max.to("cuda")
+        self.label_min = self.label_min.to("cuda")
         return label * (self.label_max - self.label_min) + self.label_min
 
 # class Dataset1D(Dataset):
