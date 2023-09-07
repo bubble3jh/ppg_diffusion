@@ -3,7 +3,7 @@ import torch
 from denoising_diffusion_pytorch.model import *
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch_1d_guided import Unet1D, GaussianDiffusion1D, Trainer1D, Dataset1D
 import paths
-from utils import get_data
+from utils import *
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 import torch.nn.functional as F
@@ -22,44 +22,48 @@ def cycle(dl):
             yield data
 
 def main(args):
+    set_seed(args.seed)
     device = torch.device("cuda")
     batch_size = args.train_batch_size
     diffuse_time_step = args.diffusion_time_steps 
     epochs=args.train_epochs
     if not args.ignore_wandb:
         wandb.init(entity="ppg-diffusion" ,project="ppg_regressor", config=args)
-        wandb.run.name=f"{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_eta_{args.eta_min}_lr_{args.init_lr}"
+        wandb.run.name=f"fold_{args.train_fold}_{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}-layer-clf"
     data = get_data(sampling_method='first_k',
                                     num_samples=5,
                                     data_root=paths.DATA_ROOT,
                                     benchmark='bcg',
-                                    train_fold=args.train_fold,
-                                    group_mode="same")
+                                    train_fold=args.train_fold)
     
     schedule_sampler = create_named_schedule_sampler(
         args.t_scheduling, diffuse_time_step=diffuse_time_step,total_epochs=epochs, init_bias=args.init_bias, final_bias=args.final_bias
     ) 
     
-    model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/epoch_{epochs}_diffuse_{diffuse_time_step}_eta_{args.eta_min}_lr_{args.init_lr}"
+    model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}-layer-clf"
 
     tr_dataset = Dataset1D(data['train']['ppg'], label=data['train']['spdp'], groups=data['train']['group_label'] ,normalize=True)
     val_dataset = Dataset1D(data['valid']['ppg'], label=data['valid']['spdp'], groups=data['valid']['group_label'] ,normalize=True)
     val_every = int(len(tr_dataset) / args.train_batch_size); print(f'eval every {val_every} epochs')
     tr_dl = DataLoader(tr_dataset, batch_size = batch_size, shuffle = True, pin_memory = True, num_workers = 0)
     tr_dl = cycle(tr_dl)
-
+    
     val_dl = DataLoader(val_dataset, batch_size = batch_size, shuffle = False, pin_memory = True, num_workers = 0)
-    regressor = Unet1DEncoder(
-            dim = args.seq_length,
-            dim_mults = (1, 2, 4, 8),
-            channels = 1
-        ).to(device)
-
+    # regressor = Unet1DEncoder(
+    #         dim = args.seq_length,
+    #         dim_mults = (1, 2, 4, 8),
+    #         channels = 1
+    #     ).to(device)
+    regressor = ResNet1D(output_size=2, final_layers=args.final_layers).to(device)
     optimizer = optim.Adam(regressor.parameters(), lr=args.init_lr)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.T_max, eta_min=args.eta_min)
 
+    # 전체 validation set 크기만큼 val_t_all을 미리 샘플링
+    total_val_size = len(val_dl.dataset)
+    val_t_all, _ = schedule_sampler.sample(total_val_size, device)
+
     if args.load_checkpoint:
-        checkpoint = torch.load(model_path+".pt")
+        checkpoint = torch.load(model_path+"_resnet.pt")
         model_state_dict = checkpoint['model_state_dict']
         optim_state_dict = checkpoint['optimizer_state_dict']
 
@@ -73,7 +77,7 @@ def main(args):
         timesteps = diffuse_time_step,
         objective = 'pred_v'
     ).to(device)
-    best_train_loss = float('inf');best_val_train_loss=float('inf');best_val_loss = float('inf');val_loss=0
+    best_train_loss = float('inf');best_val_train_loss=float('inf');best_val_loss_sbp = float('inf');best_val_loss_dbp = float('inf');val_mae_sbp = 0;val_mae_dbp = 0
     with tqdm(initial = 0, total = epochs) as pbar:
         for i in range(epochs):
             # Train step
@@ -82,8 +86,13 @@ def main(args):
             t, _ = schedule_sampler.sample(batch.size(0), device)
             batch = diffusion.q_sample(batch, t)
             optimizer.zero_grad()
-            out, emb = regressor(batch, t, g)
+            # out = regressor(batch, t, g)
+            out = regressor(batch, t, g)
             loss = F.mse_loss(out, spdp, reduction="none")
+
+            tr_mae_sbp, tr_mae_dbp = calculate_batch_mae(out, spdp, tr_dataset)
+            log_global_metrics(args, tr_mae_sbp, tr_mae_dbp, 1, "train")
+
             if args.t_scheduling == "loss-second-moment":
                 schedule_sampler.update_with_local_losses(t,loss)
             elif args.t_scheduling == "train-step":
@@ -91,14 +100,14 @@ def main(args):
             loss = loss.mean()
             t_mean = t.sum().item()/len(t)
             if not args.ignore_wandb :
-                wandb.log({"loss": loss.item(), "t_mean": t_mean})
+                wandb.log({"train_loss": loss.item(), "t_mean": t_mean})
             loss.backward()
             optimizer.step()
             scheduler.step()
             # Best Train Loss Update
-            if loss < best_train_loss:
-                print(f"best train loss updated: {loss}")
-                best_train_loss = loss
+            # if loss < best_train_loss:
+            #     print(f"best train loss updated: {loss:.4f}")
+            #     best_train_loss = loss
                 # torch.save({
                 #     'model_state_dict': regressor.state_dict(),
                 #     'optimizer_state_dict': optimizer.state_dict()
@@ -106,45 +115,51 @@ def main(args):
             # Validation Step
             if (i + 1) % val_every == 0:
                 with torch.no_grad():
-                    val_loss = 0
+                    val_loss_sbp = 0
+                    val_loss_dbp = 0
                     val_count = 0
+                    start_idx = 0
                     for data in val_dl:  
                         val_batch, val_spdp, val_g = data
                         val_batch = val_batch.to(device); val_spdp = val_spdp.to(device); val_g = val_g.to(device)
-                        val_t, _ = schedule_sampler.sample(val_batch.size(0), device)
+                   
+                        val_t = val_t_all[start_idx:start_idx + val_batch.size(0)].to(device)
                         val_batch = diffusion.q_sample(val_batch, val_t)
-                        val_out, val_emb = regressor(val_batch, val_t, val_g)
-                        # val_loss_batch = F.mse_loss(val_out, val_spdp, reduction="none").mean()
-                        val_out = val_dataset.undo_normalization_label(val_out)
-                        val_spdp = val_dataset.undo_normalization_label(val_spdp)
-                        
-                        val_loss_batch = torch.abs(val_out - val_spdp).mean()
-                        val_loss += val_loss_batch.item()
-                        val_count += 1
 
-                    val_loss /= val_count  
-                    if not args.ignore_wandb:
-                        wandb.log({"val_loss": val_loss})  
+                        val_out = regressor(val_batch, val_t, val_g)
+                        # val_out = regressor(val_batch, val_t, val_g)
+
+                        val_mae_sbp, val_mae_dbp = calculate_batch_mae(val_out, val_spdp, val_dataset)
+                        val_loss_sbp += val_mae_sbp
+                        val_loss_dbp += val_mae_dbp
+                        val_count += 1
+                    val_loss_sbp, val_loss_dbp = log_global_metrics(args, val_loss_sbp, val_loss_dbp, val_count, "valid")
+                    
                     # Best Validation Loss Update
-                    if val_loss < best_val_loss:
-                        print(f"best val loss updated: {val_loss}")
-                        best_val_loss = val_loss
+                    if val_loss_sbp+val_loss_dbp < best_val_loss_sbp+best_val_loss_dbp:
+                        print(f"best val loss updated: sbp {val_loss_sbp:.4f} dbp {val_loss_dbp:.4f}")
+                        best_val_loss_sbp = val_loss_sbp
+                        best_val_loss_dbp = val_loss_dbp
                         best_val_train_loss = loss
                         torch.save({
                             'model_state_dict': regressor.state_dict(),
                             'optimizer_state_dict': optimizer.state_dict()
-                        }, model_path+"_val.pt")
-            pbar.set_description(f'tr_loss: {loss:.4f} / val_loss: {val_loss:.4f} / t: {t_mean:.1f}')
+                        }, model_path+"_resnet.pt")
+            pbar.set_description(f'tr_loss: {loss:.4f} | tr_sbp_mae: {tr_mae_sbp:.4f} | tr_dbp_mae: {tr_mae_dbp:.4f} | val_sbp_mae: {val_mae_sbp:.4f} | val_dbp_mae: {val_mae_dbp:.4f} | t: {t_mean:.1f}')
             pbar.update(1)
     torch.save({
         'model_state_dict': regressor.state_dict(),
         'optimizer_state_dict': optimizer.state_dict()
-    }, model_path+"_last.pt")
+    }, model_path+"_last_resnet.pt")
     if not args.ignore_wandb:
-        wandb.run.summary["best_train_loss"] = best_train_loss
-        wandb.run.summary["best_val_loss"] = best_val_loss
-        wandb.run.summary["best_val_train_loss"] = best_val_loss
-
+        wandb.run.summary["best_train_loss"] = loss
+        wandb.run.summary["best_val_train_loss"] = best_val_train_loss
+        wandb.run.summary["best_val_loss_sbp"] = best_val_loss_sbp
+        wandb.run.summary["best_val_loss_dbp"] = best_val_loss_dbp
+        wandb.run.summary["best_train_loss_sbp"] = tr_mae_sbp
+        wandb.run.summary["best_train_loss_dbp"] = tr_mae_dbp
+    print(f'best_val_loss_sbp: {best_val_loss_sbp:.4f} | best_val_loss_dbp: {best_val_loss_dbp:.4f} | tr_mae_sbp: {tr_mae_sbp:.4f} | tr_mae_dbp: {tr_mae_dbp:.4f}')
+            
 if __name__ == '__main__':
 
     ## COMMON --------------------------------------------------
@@ -165,6 +180,7 @@ if __name__ == '__main__':
     ## Model ---------------------------------------------------
     parser.add_argument("--load_checkpoint", action='store_true',
         help = "Resume model training (Default : False)")
+    parser.add_argument("--final_layers", type=int, default=1)
     
     ## Training ------------------------------------------------
     parser.add_argument("--diffusion_time_steps", type=int, default=2000)
@@ -183,3 +199,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     main(args)
+

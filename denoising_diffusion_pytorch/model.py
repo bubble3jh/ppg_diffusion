@@ -3,6 +3,9 @@ from torch import nn, einsum
 import torch.nn.functional as F
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch_1d_guided import default, LinearAttention, Residual, PreNorm, Downsample, Upsample, partial, Attention, RandomOrLearnedSinusoidalPosEmb, SinusoidalPosEmb, ResnetBlock
 from denoising_diffusion_pytorch.nn import normalization, AttentionPool2d,zero_module, conv_nd
+from denoising_diffusion_pytorch.resnet import MyConv1dPadSame, MyMaxPool1dPadSame, BasicBlock
+from utils import Lambda
+
 class Classifier(nn.Module):
     def __init__(self, image_size, num_classes, t_dim=1) -> None:
         super().__init__()
@@ -171,3 +174,189 @@ class Unet1DEncoder(nn.Module):
         emb = self.mid_block2(x, tg)
 
         return self.out_mlp(emb), emb
+
+class ResNet1D(nn.Module):
+    """
+    
+    Input:
+        X: (n_samples, n_channel, n_length)
+        Y: (n_samples)
+        
+    Output:
+        out: (n_samples)
+        
+    Pararmetes:
+        in_channels: dim of input, the same as n_channel
+        base_filters: number of filters in the first several Conv layer, it will double at every 4 layers
+        kernel_size: width of kernel
+        stride: stride of kernel moving
+        groups: set larget to 1 as ResNeXt
+        n_block: number of blocks
+        n_classes: number of classes
+        
+    """
+    def __init__(self, in_channels=1, base_filters=32, first_kernel_size=5, kernel_size=3, stride=4, 
+                        groups=2, n_block=8, output_size=2 , is_se=False, se_ch_low=4, downsample_gap=2, 
+                        increasefilter_gap=2, use_bn=True, use_do=True, self_condition=False, final_layers=1):
+        super(ResNet1D, self).__init__()
+        
+        self.n_block = n_block
+        self.first_kernel_size = first_kernel_size
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.groups = groups
+        self.use_bn = use_bn
+        self.use_do = use_do
+        self.is_se = is_se
+        self.se_ch_low = se_ch_low
+        self.channels = in_channels
+        self.self_condition = self_condition
+
+        self.downsample_gap = downsample_gap # 2 for base model
+        self.increasefilter_gap = increasefilter_gap # 4 for base model
+
+        # first block
+        self.first_block_conv = MyConv1dPadSame(in_channels=in_channels, out_channels=base_filters, kernel_size=self.first_kernel_size, stride=1)
+        self.first_block_bn = nn.BatchNorm1d(base_filters)
+        self.first_block_relu = nn.ReLU()
+        self.first_block_maxpool = MyMaxPool1dPadSame(kernel_size=self.stride)
+        out_channels = base_filters
+                
+        # residual blocks
+        self.basicblock_list = nn.ModuleList()
+        for i_block in range(self.n_block):
+            # is_first_block
+            if i_block == 0:
+                is_first_block = True
+            else:
+                is_first_block = False
+            # downsample at every self.downsample_gap blocks
+            if i_block % self.downsample_gap == 1:
+                downsample = True
+            else:
+                downsample = False
+            # in_channels and out_channels
+            if is_first_block:
+                in_channels = base_filters
+                out_channels = in_channels
+            else:
+                # increase filters at every self.increasefilter_gap blocks
+                in_channels = int(base_filters*2**((i_block-1)//self.increasefilter_gap))
+                if (i_block % self.increasefilter_gap == 0) and (i_block != 0):
+                    out_channels = in_channels * 2
+                else:
+                    out_channels = in_channels
+            
+            tmp_block = BasicBlock(
+                in_channels=in_channels, 
+                out_channels=out_channels, 
+                kernel_size=self.kernel_size, 
+                stride = self.stride, 
+                groups = self.groups, 
+                downsample=downsample, 
+                use_bn = self.use_bn, 
+                use_do = self.use_do, 
+                is_first_block=is_first_block,
+                is_se=self.is_se,
+                se_ch_low=self.se_ch_low)
+            self.basicblock_list.append(tmp_block)
+
+        # final prediction
+        self.final_bn = nn.BatchNorm1d(out_channels)
+        self.final_relu = nn.ReLU(inplace=True)
+
+        # condtional layer
+        fourier_dim = 256; time_dim = 625
+        sinu_pos_emb = SinusoidalPosEmb(fourier_dim)
+        self.time_mlp = nn.Sequential(
+            sinu_pos_emb,
+            nn.Linear(fourier_dim, time_dim), # fourier_dim - 1 ?
+            nn.GELU(),
+            nn.Linear(time_dim, time_dim),
+            Lambda(lambda x: x.unsqueeze(1)) # Add a dimension at position 1
+        )
+        num_groups=6
+        # self.group_emb = nn.Embedding(num_groups, time_dim)
+        self.spdp_encoder = MLP(input_dim = 2, hidden_dim = 256, output_dim = 256, num_layers = 3)
+        
+        # Classifier
+        # self.main_clf = nn.Linear(out_channels, output_size)
+        self.main_clf = MLP(input_dim = out_channels, hidden_dim = out_channels, output_dim = output_size, num_layers = final_layers)
+
+    def forward(self, x, t=None, g=None):
+        # x = x['ppg']
+        assert len(x.shape) == 3
+        if t != None:
+            assert x.shape[0] == t.shape[0]
+
+            t = self.time_mlp(t)
+            assert x.shape == t.shape
+            x = x + t # t정보가 원시 diffuse image에 직접적인 정보를 준다고 판단, 초기에 t를 추가했으나 t정보가 너무 지배적이라면 다른 feature학습이 어려울 수 있음.
+
+        # skip batch norm if batchsize<4:
+        if x.shape[0]<4:    self.use_bn = False 
+        
+        # first conv
+        out = self.first_block_conv(x)
+        if self.use_bn:
+            out = self.first_block_bn(out)
+        out = self.first_block_relu(out)
+        out = self.first_block_maxpool(out)
+        
+        # residual blocks, every block has two conv
+        for i_block in range(self.n_block):
+            net = self.basicblock_list[i_block]
+            out = net(out)
+        
+        # final prediction
+        if self.use_bn:
+            out = self.final_bn(out)
+        h = self.final_relu(out)
+        h = h.mean(-1) # (n_batch, out_channels)
+        # logger.info('final pooling', h.shape)
+
+        # Condition with label g
+        if g != None:
+            h = h + self.spdp_encoder(g.type(torch.float32))
+
+        # ===== Concat x_demo
+        out = self.main_clf(h)
+        return out
+
+def init_weights(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv2d') != -1 or classname.find('ConvTranspose2d') != -1:
+        nn.init.kaiming_uniform_(m.weight)
+        nn.init.zeros_(m.bias)
+    elif classname.find('BatchNorm') != -1:
+        nn.init.normal_(m.weight, 1.0, 0.02)
+        nn.init.zeros_(m.bias)
+    elif classname.find('Linear') != -1:
+        nn.init.xavier_normal_(m.weight.data, gain=1.414)
+
+class MLP(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+        super(MLP, self).__init__()
+        self.layers = nn.ModuleList()
+
+        if num_layers == 1:
+            # If num_layers is 1, create a Linear layer
+            self.layers.append(nn.Linear(input_dim, output_dim))
+        else:
+            # Create the input layer
+            self.layers.append(nn.Linear(input_dim, hidden_dim))
+            
+            # Create hidden layers
+            for _ in range(num_layers - 2):
+                self.layers.append(nn.Linear(hidden_dim, hidden_dim))
+            
+            # Create the output layer
+            self.layers.append(nn.Linear(hidden_dim, output_dim))
+            
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            if i == len(self.layers) - 1:
+                x = layer(x)  # No activation for the last layer
+            else:
+                x = F.relu(layer(x))
+        return x

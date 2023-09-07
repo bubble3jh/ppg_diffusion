@@ -19,8 +19,7 @@ do
           --diffusion_time_steps ${diffusion_time_steps} \
           --sample_only \
           --train_fold ${train_fold} \
-          --target_group ${target_group} \
-          --t_scheduling "uniform" &  # 백그라운드에서 실행
+          --target_group ${target_group} &  # 백그라운드에서 실행
 
           # GPU ID를 다음 것으로 변경
           IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))
