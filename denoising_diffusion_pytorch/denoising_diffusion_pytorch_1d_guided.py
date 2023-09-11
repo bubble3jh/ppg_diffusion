@@ -91,19 +91,18 @@ class Dataset1D(Dataset):
     def __init__(self, tensor: torch.Tensor, label: torch.Tensor = None, groups: torch.Tensor = None, normalize: bool = False):
         super().__init__()
         self.tensor = tensor.clone()
+        self.label = label
         self.groups = groups
         self.normalize = normalize
-        if label != None:
-            self.label = label
-            if self.normalize:
-                self.label_min = torch.min(self.label, dim=0)[0]
-                self.label_max = torch.max(self.label, dim=0)[0]
-                self.label = self._min_max_normalize(self.label, self.label_max, self.label_min)
         # Calculate min and max if normalization is required
         if self.normalize:
             self.tensor_min = torch.min(self.tensor)
             self.tensor_max = torch.max(self.tensor)
             self.tensor = self._min_max_normalize(self.tensor, self.tensor_max, self.tensor_min)
+            if label != None:
+                self.label_min = torch.min(self.label, dim=0)[0]
+                self.label_max = torch.max(self.label, dim=0)[0]
+                self.label = self._min_max_normalize(self.label, self.label_max, self.label_min)
 
     def __len__(self):
         return len(self.tensor)
@@ -445,8 +444,9 @@ class Unet1D(nn.Module):
         for idx, (block1, block2, attn, upsample) in enumerate(self.ups):
 
             # Check if it's the last upsample step
-            if idx == len(self.ups) - 1:
+            if idx == 1:
                 x = expand_last_dimension(x)
+            
             x = torch.cat((x, h.pop()), dim = 1)
             x = block1(x, t)
 
@@ -829,7 +829,7 @@ class Trainer1D(object):
         ema_update_every = 10,
         ema_decay = 0.995,
         adam_betas = (0.9, 0.99),
-        save_and_sample_every = 100000,
+        save_and_sample_every = 1000000,
         num_samples = 25,
         results_folder = './results',
         amp = False,
@@ -939,8 +939,8 @@ class Trainer1D(object):
                 total_loss = 0.
 
                 for i, _ in enumerate(range(self.gradient_accumulate_every)):
-                    # data = next(self.dl).to(device)
-                    data, _, _  = next(self.dl)
+                    data = next(self.dl).to(device)
+                    # data, _, _  = next(self.dl)
                     data = data.to(device)
                     with self.accelerator.autocast():
                         loss = self.model(data)

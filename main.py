@@ -75,7 +75,7 @@ def main(args):
 
     train_set_root = paths.TRAINSET_ROOT
     train_setting = f'fold_{args.train_fold}/seed_{args.seed}_sampling_method_{args.sampling_method}_num_samples_{args.num_samples}-'\
-                      f'diffusion_time_steps_{args.diffusion_time_steps}-train_num_steps_{args.train_num_steps}'
+                      f'diffusion_time_steps_{args.diffusion_time_steps}-train_num_steps_{args.train_num_steps}_{args.benchmark}'
     if not args.ignore_wandb:
         wandb.init(project='check_train_time',
                    entity='ppg-diffusion')
@@ -100,11 +100,12 @@ def main(args):
     #                              num_samples=args.num_samples,
     #                              data_root=paths.DATA_ROOT,
     #                              benchmark=args.benchmark)
-    data = get_data(sampling_method='first_k',
-                                    num_samples=5,
-                                    data_root=paths.DATA_ROOT,
-                                    benchmark='bcg',
-                                    train_fold=args.train_fold)
+    # data = get_data(sampling_method='first_k',
+    #                                 num_samples=5,
+    #                                 data_root=paths.DATA_ROOT,
+    #                                 benchmark='bcg',
+    #                                 train_fold=args.train_fold)
+    data = get_data(benchmark=args.benchmark, d500_idx=args.d500_idx)
     data_sampling_time = time.time() - data_sampling_start
     if not args.ignore_wandb:
         wandb.log({'n_sample': args.num_samples})
@@ -115,15 +116,17 @@ def main(args):
     # with open(os.path.join(train_set_root, train_set_name), 'wb') as f:
     #     pickle.dump(ppg, f)
     
-    tr_dataset = dataset = Dataset1D(data['train']['ppg'], label=data['train']['spdp'], groups=data['train']['group_label'] ,normalize=True)
-    val_dataset = Dataset1D(data['valid']['ppg'], label=data['valid']['spdp'], groups=data['valid']['group_label'] ,normalize=True)
+    # tr_dataset = dataset = Dataset1D(data['train']['ppg'], label=data['train']['spdp'], groups=data['train']['group_label'] ,normalize=True)
+    # val_dataset = Dataset1D(data['valid']['ppg'], label=data['valid']['spdp'], groups=data['valid']['group_label'] ,normalize=True)
+
+    dataset = Dataset1D(data, normalize=True)
 
     #----------------------------------- Create Model ------------------------------------
 
     model = Unet1D(
         dim = 64,
         dim_mults = (1, 2, 4, 8),
-        channels = 1
+        channels = args.channels
     )
 
     diffusion = GaussianDiffusion1D(
@@ -134,51 +137,31 @@ def main(args):
         normalized = args.min_max,             
         denorm_func = dataset.undo_normalization if args.min_max else None
     )
-    # trainer = Trainer1D(
-    #     diffusion,
-    #     dataset = dataset,
-    #     train_batch_size = 64,
-    # )
-    # classifier = Classifier(image_size=seq_length, num_classes=2, t_dim=1)
-    # regressor = Unet1DEncoder(
-    #     dim = args.seq_length,
-    #     dim_mults = (1, 2, 4, 8),
-    #     channels = 1
-    # ).to(device)
-    # if args.train_fold == 0:
-    #     best_eta=0.01; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
-    # elif args.train_fold == 1:
-    #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
-    # elif args.train_fold == 2:
-    #     best_eta=0.0; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
-    # elif args.train_fold == 3:
-    #     best_eta=0.0; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
-    # elif args.train_fold == 4:
-    #     best_eta=0.0; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000
+
     # resnet ------
-    if args.train_fold == 0:
-        best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="loss-second-moment"
-    elif args.train_fold == 1:
-        best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="train-step"
-    elif args.train_fold == 2:
-        best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="uniform"
-    elif args.train_fold == 3:
-        best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
-    elif args.train_fold == 4:
-        best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
-
-    regressor = ResNet1D(output_size=2, final_layers=args.final_layers).to(device)
-
-    # TODO: t schedular 기준으로 다시 모델 저장하게 만들어야함
-    if args.reg_model_sel == "val":
-        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_eta_{best_eta}_lr_{best_lr}_{args.final_layers}-layer-clf_resnet.pt" # test best model로 변경
-    elif args.reg_model_sel == "last":
-        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_eta_{best_eta}_lr_{best_lr}_{args.final_layers}-layer-clf_last_resnet.pt" # test best model로 변경
-        
     if not args.disable_guidance:
+        if args.train_fold == 0:
+            best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="loss-second-moment"
+        elif args.train_fold == 1:
+            best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="train-step"
+        elif args.train_fold == 2:
+            best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="uniform"
+        elif args.train_fold == 3:
+            best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
+        elif args.train_fold == 4:
+            best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
+
+        regressor = ResNet1D(output_size=2, final_layers=args.final_layers).to(device)
+
+        # TODO: t schedular 기준으로 다시 모델 저장하게 만들어야함
+        if args.reg_model_sel == "val":
+            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_eta_{best_eta}_lr_{best_lr}_{args.final_layers}-layer-clf_resnet.pt" # test best model로 변경
+        elif args.reg_model_sel == "last":
+            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_eta_{best_eta}_lr_{best_lr}_{args.final_layers}-layer-clf_last_resnet.pt" # test best model로 변경
+            
         model_state_dict = torch.load(model_path)['model_state_dict']
         regressor.load_state_dict(model_state_dict)
-    regressor.eval()
+        regressor.eval()
 
     #------------------------------------- Training --------------------------------------
     
@@ -201,7 +184,7 @@ def main(args):
         trainer.load('last')
 
     #------------------------------------- Sampling --------------------------------------
-
+    target_group=args.target_group
     if not args.disable_guidance:
         print("sampling with guidance")
         if args.target_group == -1:
@@ -212,7 +195,7 @@ def main(args):
     else:
         sampled_seq = diffusion.sample(batch_size = 16) #TODO: hard coding
         os.makedirs(sampling_dir, exist_ok=True)
-        with open(f'{sampling_dir}/sample_{target_group}.pkl', 'wb') as f:
+        with open(f'{sampling_dir}/sample_{target_group}_ch_{args.d500_idx}.pkl', 'wb') as f:
             pickle.dump(sampled_seq, f)
     print(f"Data sampled at {sampling_dir}")
     #------------------------------------- Visualize --------------------------------------
@@ -233,13 +216,15 @@ if __name__ == '__main__':
 
     ## DATA ----------------------------------------------------
     parser.add_argument("--num_samples", type=int, default=5)
-    parser.add_argument("--seq_length", type=int, default=625)
+    parser.add_argument("--seq_length", type=int, default=625) #32660
     parser.add_argument("--sampling_method", type=str, default='first_k')
     parser.add_argument("--train_batch_size", type=int, default=32)
     parser.add_argument("--min_max", action='store_false',
         help = "Min-Max normalize data (Default : True)")
     parser.add_argument("--benchmark", type=str, default='bcg')
     parser.add_argument("--train_fold", type=int, default=0)
+    parser.add_argument("--channels", type=int, default=1)
+    parser.add_argument("--d500_idx", type=int, default=1, choices=[1,2,3,4,5,6])
 
     ## Model ---------------------------------------------------
     parser.add_argument("--disable_guidance", action='store_true',

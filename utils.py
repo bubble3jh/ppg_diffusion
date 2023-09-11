@@ -100,7 +100,8 @@ def get_data(sampling_method='first_k',
              data_root='./',
              benchmark='bcg',
              train_fold = 0,
-             group_mode="same"):
+             group_mode="same",
+             d500_idx=0):
     if benchmark=='bcg':
         if train_fold == 0:
             fold_nums = [0,1,4]
@@ -152,6 +153,11 @@ def get_data(sampling_method='first_k',
         training_seq = torch.stack(sample_list).unsqueeze(1).half()
         
         return training_seq, len_seq
+    
+    #--------------------------------------------------------------------------------------
+    
+    elif benchmark == 'd500':
+        return torch.load(f'/data1/bubble3jh/ppg/data/six_ch/d500_sliced_{d500_idx}.pth')
     
 def fold_data(fold_nums, group_mode):
     ppgs, spdps, group_labels = [], [], []
