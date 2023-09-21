@@ -2,6 +2,7 @@ import os
 import torch
 import pickle
 import numpy as np
+import pandas as pd
 import tabulate
 from collections import defaultdict, Counter
 import scipy.io
@@ -44,36 +45,21 @@ def sample_sbp_dbp(target_group, batch_size, mode = "sample_each"):
         sbp = np.random.uniform(140, 180, size=size)
         dbp = np.random.uniform(90, 120, size=size)
     elif target_group == 4:#"crisis":
-        sbp = np.random.uniform(180, 200, size=size)
-        dbp = np.random.uniform(120, 130, size=size)
+        # sbp = np.random.uniform(180, 200, size=size)
+        # dbp = np.random.uniform(120, 130, size=size)
+        raise ValueError("[crisis] group is deprecated")
     else:
         raise ValueError("Invalid target group")
     print(f"Target ({target_group}) Batch ({sbp.shape[0]}) : [sbp {sbp.mean().item():.2f}, dbp {dbp.mean().item():.2f}]")
     if mode == "same":
         return torch.tensor([[sbp, dbp]] * batch_size)
     return torch.tensor(np.array([sbp, dbp]).T)
-
-def assign_group_label_old(sbp, dbp):
-    if 80 <= sbp < 90 and 40 <= dbp < 60:
-        return 1 #"hypo"
-    elif 90 <= sbp < 120 and 60 <= dbp < 80:
-        return 2 #"normal"
-    elif 120 <= sbp < 140 and 80 <= dbp < 90:
-        return 3 #"prehyper"
-    elif 140 <= sbp < 180 and 90 <= dbp < 120:
-        return 4 #"hyper2"
-    elif 180 <= sbp < 200 and 120 <= dbp < 130:
-        return 5 #"crisis"
-    else:
-        return 0 #"undefined"
     
 def assign_group_label(sbp, dbp, mode, r=10):
-    if (sbp <= 80) or (sbp >= 200) or (dbp >= 130) or (dbp <= 40):
+    if (sbp <= 80) or (sbp >= 180) or (dbp >= 120) or (dbp <= 40): # add crisis
         return None # eliminate from dataset
     if mode=="etri":
-        if (180 <= sbp) or (120 <= dbp):
-            return 4 #"crisis"
-        elif (140 <= sbp) or (90 <= dbp):
+        if (140 <= sbp) or (90 <= dbp):
             return 3 #"hyper2"
         elif (120 <= sbp) or (80 <= dbp):
             return 2 #"prehyper"
@@ -86,6 +72,23 @@ def assign_group_label(sbp, dbp, mode, r=10):
         dbp_label = (dbp - 40) // 10
         return (sbp_label, dbp_label)
     
+def same_to_group(same):   
+    new_group=[]
+    for a in same:
+        sbp=a[0]; dbp=a[1]
+        if (6 <= sbp) or (5 <= dbp):
+            new_group.append(3) #"hyper2"
+        elif (4 <= sbp) or (4 <= dbp):
+            new_group.append(2) #"prehyper"
+        elif (1 <= sbp) or (2 <= dbp):
+            new_group.append(1) #"normal"
+        elif (0 <= sbp) or (0 <= dbp):
+            new_group.append(0) #"hypo"
+    return torch.tensor(new_group)
+
+
+
+
 def print_group_counts(group_labels):
     group_names = {0: "undefined", 1: "hypo", 2: "normal", 3: "prehyper", 4: "hyper2", 5: "crisis"}
     group_counts = defaultdict(int, Counter(group_labels))
@@ -177,7 +180,7 @@ def fold_data(fold_nums, group_mode):
                 group_labels.append(group_label)
             else:
                 count = count + 1
-    print_group_counts(group_labels)
+    # print_group_counts(group_labels)
     print(f"{count} datas eliminated.\n")
     return torch.cat(ppgs, dim=0).unsqueeze(1).half(), torch.stack(spdps, dim=0).float(), torch.tensor(group_labels)
 
@@ -214,35 +217,77 @@ class Lambda(nn.Module):
     
 
 # Batch-wise MAE 계산 함수
-def calculate_batch_mae(model_output, ground_truth, dataset):
+def calculate_batch_mae(model_output, ground_truth, dataset, group, mae_sbp_lists, mae_dbp_lists, overall_mae_sbp_list, overall_mae_dbp_list):
     model_output = dataset.undo_normalization_label(model_output)
     ground_truth = dataset.undo_normalization_label(ground_truth)
-    import pandas as pd
-    # Save model_output to CSV
+    group = same_to_group(group)
+
+    # Calculate overall MAE for all data (ignoring group labels)
+    overall_loss_batch = torch.abs(model_output - ground_truth)
+    overall_mae_sbp_list.extend(overall_loss_batch[:, 0].detach().cpu().numpy().tolist())
+    overall_mae_dbp_list.extend(overall_loss_batch[:, 1].detach().cpu().numpy().tolist())
+
+    # Loop through each unique group value (0 to 4)
+    for g in torch.unique(group):
+        # Get the indices for the current group
+        indices = torch.where(group == g)[0]
+        
+        # Extract model outputs and ground truth values for the current group
+        model_output_group = model_output[indices]
+        ground_truth_group = ground_truth[indices]
+        
+        # Calculate MAE for the current group
+        loss_batch = torch.abs(model_output_group - ground_truth_group)
+        mae_sbp = loss_batch[:, 0].detach().cpu().numpy().tolist()
+        mae_dbp = loss_batch[:, 1].detach().cpu().numpy().tolist()
+        
+        # Save the MAE values to the lists
+        if g.item() not in mae_sbp_lists:
+            mae_sbp_lists[g.item()] = []
+            mae_dbp_lists[g.item()] = []
+
+        mae_sbp_lists[g.item()].extend(mae_sbp)
+        mae_dbp_lists[g.item()].extend(mae_dbp)
+    
+    # Save model_output and ground_truth to CSV
     df_output = pd.DataFrame(model_output.detach().cpu().numpy(), columns=['Output_SBP', 'Output_DBP'])
     df_output.to_csv('/data1/bubble3jh/ppg/denoising-diffusion-pytorch/check_outs/model_output.csv', index=False)
     
-    # Save ground_truth to CSV
     df_truth = pd.DataFrame(ground_truth.detach().cpu().numpy(), columns=['True_SBP', 'True_DBP'])
     df_truth.to_csv('/data1/bubble3jh/ppg/denoising-diffusion-pytorch/check_outs/ground_truth.csv', index=False)
-    
-    loss_batch = torch.abs(model_output - ground_truth)
-    mae_sbp = loss_batch[:, 0].mean().item()
-    mae_dbp = loss_batch[:, 1].mean().item()
-    
-    return mae_sbp, mae_dbp
+    return overall_mae_sbp_list , overall_mae_dbp_list , mae_sbp_lists , mae_dbp_lists 
 
 # Global Metrics Logging 함수
-def log_global_metrics(args, total_mae_sbp, total_mae_dbp, total_count, phase):
-    avg_mae_sbp = total_mae_sbp / total_count
-    avg_mae_dbp = total_mae_dbp / total_count
+def log_global_metrics(args, overall_mae_sbp_list, overall_mae_dbp_list, mae_sbp_lists, mae_dbp_lists, phase):
+    # Calculate and log overall MAE for SBP and DBP
+    overall_mae_sbp = sum(overall_mae_sbp_list) / len(overall_mae_sbp_list)
+    overall_mae_dbp = sum(overall_mae_dbp_list) / len(overall_mae_dbp_list)
     
+    # print(f"{phase} Overall Mean MAE_SBP: {overall_mae_sbp}")
+    # print(f"{phase} Overall Mean MAE_DBP: {overall_mae_dbp}")
+
+    # Calculate and log MAE for each group
+    for group, values in mae_sbp_lists.items():
+        group_mae_sbp = sum(values) / len(values)
+        # print(f"{phase} Mean MAE_SBP for group {group}: {group_mae_sbp}")
+
+    for group, values in mae_dbp_lists.items():
+        group_mae_dbp = sum(values) / len(values)
+        # print(f"{phase} Mean MAE_DBP for group {group}: {group_mae_dbp}")
+
+    # Logging to Weights and Biases (wandb) if it's not ignored
     if not args.ignore_wandb:
-        wandb.log({
-            f"{phase}_avg_mae_sbp": avg_mae_sbp,
-            f"{phase}_avg_mae_dbp": avg_mae_dbp
-        })
-    return avg_mae_sbp, avg_mae_dbp
+        wandb_metrics = {
+            f"{phase}_overall_mae_sbp": overall_mae_sbp,
+            f"{phase}_overall_mae_dbp": overall_mae_dbp
+        }
+        
+        for group in mae_sbp_lists.keys():
+            wandb_metrics[f"{phase}_group_{group}_mae_sbp"] = sum(mae_sbp_lists[group]) / len(mae_sbp_lists[group])
+            wandb_metrics[f"{phase}_group_{group}_mae_dbp"] = sum(mae_dbp_lists[group]) / len(mae_dbp_lists[group])
+            
+        wandb.log(wandb_metrics)
+    return overall_mae_sbp, overall_mae_dbp, mae_sbp_lists, mae_dbp_lists
 
 def set_seed(random_seed=1000):
     '''

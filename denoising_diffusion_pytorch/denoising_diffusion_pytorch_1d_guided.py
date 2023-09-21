@@ -444,7 +444,7 @@ class Unet1D(nn.Module):
         for idx, (block1, block2, attn, upsample) in enumerate(self.ups):
 
             # Check if it's the last upsample step
-            if idx == 1:
+            if idx == len(self.ups) - 1:
                 x = expand_last_dimension(x)
             
             x = torch.cat((x, h.pop()), dim = 1)
@@ -939,8 +939,8 @@ class Trainer1D(object):
                 total_loss = 0.
 
                 for i, _ in enumerate(range(self.gradient_accumulate_every)):
-                    data = next(self.dl).to(device)
-                    # data, _, _  = next(self.dl)
+                    # data = next(self.dl).to(device)
+                    data, _, _  = next(self.dl)
                     data = data.to(device)
                     with self.accelerator.autocast():
                         loss = self.model(data)

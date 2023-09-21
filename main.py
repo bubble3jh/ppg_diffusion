@@ -105,21 +105,19 @@ def main(args):
     #                                 data_root=paths.DATA_ROOT,
     #                                 benchmark='bcg',
     #                                 train_fold=args.train_fold)
-    data = get_data(benchmark=args.benchmark, d500_idx=args.d500_idx)
+    data = get_data(benchmark=args.benchmark)
     data_sampling_time = time.time() - data_sampling_start
     if not args.ignore_wandb:
         wandb.log({'n_sample': args.num_samples})
         wandb.log({'data_sampling_time': data_sampling_time})
     print(f"data sampling finished, collapsed time: {data_sampling_time:.5f}")
     os.makedirs(train_set_root, exist_ok=True)
-    # TODO : ppg 저장 파일/label도 같이/tr, val 따로?
+    
     # with open(os.path.join(train_set_root, train_set_name), 'wb') as f:
     #     pickle.dump(ppg, f)
     
-    # tr_dataset = dataset = Dataset1D(data['train']['ppg'], label=data['train']['spdp'], groups=data['train']['group_label'] ,normalize=True)
-    # val_dataset = Dataset1D(data['valid']['ppg'], label=data['valid']['spdp'], groups=data['valid']['group_label'] ,normalize=True)
-
-    dataset = Dataset1D(data, normalize=True)
+    tr_dataset = dataset = Dataset1D(data['train']['ppg'], label=data['train']['spdp'], groups=data['train']['group_label'] ,normalize=True)
+    val_dataset = Dataset1D(data['valid']['ppg'], label=data['valid']['spdp'], groups=data['valid']['group_label'] ,normalize=True)
 
     #----------------------------------- Create Model ------------------------------------
 
@@ -140,24 +138,33 @@ def main(args):
 
     # resnet ------
     if not args.disable_guidance:
+        # if args.train_fold == 0:
+        #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="loss-second-moment"
+        # elif args.train_fold == 1:
+        #     best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="train-step"
+        # elif args.train_fold == 2:
+        #     best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="uniform"
+        # elif args.train_fold == 3:
+        #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
+        # elif args.train_fold == 4:
+        #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
         if args.train_fold == 0:
-            best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="loss-second-moment"
+            best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=12; args.t_sampler="train-step"; args.wd =0.0001 ;args.nblock=8
         elif args.train_fold == 1:
-            best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="train-step"
+            best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=4; args.t_sampler="train-step"; args.wd =0.0001 ;args.nblock=8
         elif args.train_fold == 2:
-            best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="uniform"
+            best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=4; args.t_sampler="train-step"; args.wd =0.001 ;args.nblock=8
         elif args.train_fold == 3:
-            best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
+            best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="train-step"; args.wd =0.001 ;args.nblock=8
         elif args.train_fold == 4:
-            best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
+            best_eta=0.01; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=4; args.t_sampler="uniform"; args.wd =0.0001 ;args.nblock=8
 
         regressor = ResNet1D(output_size=2, final_layers=args.final_layers).to(device)
 
-        # TODO: t schedular 기준으로 다시 모델 저장하게 만들어야함
         if args.reg_model_sel == "val":
-            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_eta_{best_eta}_lr_{best_lr}_{args.final_layers}-layer-clf_resnet.pt" # test best model로 변경
+            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.wd}_eta_{best_eta}_lr_{best_lr}_nblock_{args.nblock}_{args.final_layers}-layer-clf_resnet.pt" # test best model로 변경
         elif args.reg_model_sel == "last":
-            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_eta_{best_eta}_lr_{best_lr}_{args.final_layers}-layer-clf_last_resnet.pt" # test best model로 변경
+            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.wd}_eta_{best_eta}_lr_{best_lr}_nblock_{args.nblock}_{args.final_layers}-layer-clf_last_resnet.pt" # test best model로 변경
             
         model_state_dict = torch.load(model_path)['model_state_dict']
         regressor.load_state_dict(model_state_dict)
@@ -188,7 +195,7 @@ def main(args):
     if not args.disable_guidance:
         print("sampling with guidance")
         if args.target_group == -1:
-            for target_group in [0,1,2,3,4]:
+            for target_group in [0,1,2,3]:
                 generate_diffusion_sequence(args, data, dataset, device, diffusion, regressor_cond_fn, regressor, sampling_dir, target_group)
         else:
             generate_diffusion_sequence(args, data, dataset, device, diffusion, regressor_cond_fn, regressor, sampling_dir, args.target_group)

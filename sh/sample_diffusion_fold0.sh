@@ -1,41 +1,5 @@
-#!/bin/bash
-
-GPU_IDS=(4 5 6 7)  # 사용할 GPU ID 리스트
-IDX=0
-# target_group=-1
-for regressor_epoch in 2000
-do
-  for diffusion_time_steps in 2000
-  do
-    for train_num_steps in 16 # 32
-    do
-      for train_lr in 8e-5 # 8e-6
-        do
-          for train_fold in 0 # 1 2 3 4 
-          do
-            for target_group in 0 1 2 3 4
-            do
-          # 현재 GPU ID 선택
-          CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} /mlainas/bubble3jh/anaconda3/envs/ppg/bin/python main.py \
-          --regressor_epoch ${regressor_epoch} \
-          --diffusion_time_steps ${diffusion_time_steps} \
-          --sample_only \
-          --train_fold ${train_fold} \
-          --reg_model_sel val \
-          --target_group ${target_group} \
-          --t_scheduling "uniform" &  # 백그라운드에서 실행
-          # GPU ID를 다음 것으로 변경
-          IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))
-
-          # 모든 GPU가 사용 중이면 기다림
-          if [ $IDX -eq 0 ]; then
-            wait
-          fi
-          done
-        done
-      done  
-    done
-  done
-done
-
-wait  # 마지막 배치의 모든 작업이 완료될 때까지 기다림
+python /data1/bubble3jh/ppg/denoising-diffusion-pytorch/reg_resnet.py --train_epochs 2000 --diffusion_time_steps 2000 --T_max 2000 --eta_min 0.01 --init_lr 1e-05 --n_block 8 --train_fold 0 --weight_decay 0.001 --final_layers 12 --t_scheduling train-step &
+python /data1/bubble3jh/ppg/denoising-diffusion-pytorch/reg_resnet.py --train_epochs 2000 --diffusion_time_steps 2000 --T_max 2000 --eta_min 0.01 --init_lr 0.0001 --n_block 8 --train_fold 1 --weight_decay 0.001 --final_layers 8 --t_scheduling train-step &
+python /data1/bubble3jh/ppg/denoising-diffusion-pytorch/reg_resnet.py --train_epochs 2000 --diffusion_time_steps 2000 --T_max 2000 --eta_min 0.01 --init_lr 0.001 --n_block 8 --train_fold 2 --weight_decay 0.001 --final_layers 4 --t_scheduling train-step &
+python /data1/bubble3jh/ppg/denoising-diffusion-pytorch/reg_resnet.py --train_epochs 2000 --diffusion_time_steps 2000 --T_max 2000 --eta_min 0.01 --init_lr 0.0001 --n_block 8 --train_fold 3 --weight_decay 0.0001 --final_layers 8 --t_scheduling loss-second-moment &
+python /data1/bubble3jh/ppg/denoising-diffusion-pytorch/reg_resnet.py --train_epochs 2000 --diffusion_time_steps 2000 --T_max 2000 --eta_min 0.001 --init_lr 1e-05 --n_block 8 --train_fold 4 --weight_decay 0.0001 --final_layers 8 --t_scheduling loss-second-moment &

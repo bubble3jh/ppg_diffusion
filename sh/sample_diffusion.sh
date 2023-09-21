@@ -1,13 +1,13 @@
 #!/bin/bash
 
-GPU_IDS=(3 4 5 6 7)  # 사용할 GPU ID 리스트
+GPU_IDS=(4 5 6 7)  # 사용할 GPU ID 리스트
 IDX=0
 target_group=-1
 for regressor_epoch in 2000
 do
   for diffusion_time_steps in 2000
   do
-    for train_num_steps in 16 # 32
+    for train_num_steps in 32 # 16
     do
       for train_lr in 8e-5 # 8e-6
         do
@@ -18,6 +18,7 @@ do
           --regressor_epoch ${regressor_epoch} \
           --diffusion_time_steps ${diffusion_time_steps} \
           --sample_only \
+          --train_num_steps ${train_num_steps} \
           --train_fold ${train_fold} \
           --target_group ${target_group} &  # 백그라운드에서 실행
 
