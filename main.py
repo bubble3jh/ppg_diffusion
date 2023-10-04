@@ -54,7 +54,7 @@ def generate_diffusion_sequence(args, data, dataset, device, diffusion, regresso
             'y': torch.cat(ori_y_list, dim=0)
         }
         print(f"Sampling completed for target group {target_group}\nat {sampling_dir}")
-        with open(f'{sampling_dir}/sample_{target_group}.pkl', 'wb') as f:
+        with open(f'{sampling_dir}/sample_{args.run_name}_{target_group}.pkl', 'wb') as f:
             pickle.dump(result, f)
             
     except RuntimeError as e:
@@ -100,12 +100,12 @@ def main(args):
     #                              num_samples=args.num_samples,
     #                              data_root=paths.DATA_ROOT,
     #                              benchmark=args.benchmark)
-    # data = get_data(sampling_method='first_k',
-    #                                 num_samples=5,
-    #                                 data_root=paths.DATA_ROOT,
-    #                                 benchmark='bcg',
-    #                                 train_fold=args.train_fold)
-    data = get_data(benchmark=args.benchmark)
+    data = get_data(sampling_method='first_k',
+                                    num_samples=5,
+                                    data_root=paths.DATA_ROOT,
+                                    benchmark='bcg',
+                                    train_fold=args.train_fold)
+    # data = get_data(benchmark=args.benchmark)
     data_sampling_time = time.time() - data_sampling_start
     if not args.ignore_wandb:
         wandb.log({'n_sample': args.num_samples})
@@ -138,6 +138,7 @@ def main(args):
 
     # resnet ------
     if not args.disable_guidance:
+        ## val best
         # if args.train_fold == 0:
         #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="loss-second-moment"
         # elif args.train_fold == 1:
@@ -148,6 +149,8 @@ def main(args):
         #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
         # elif args.train_fold == 4:
         #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
+        
+        ## gal val best
         if args.train_fold == 0:
             best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=12; args.t_sampler="train-step"; args.wd =0.0001 ;args.nblock=8
         elif args.train_fold == 1:
@@ -159,12 +162,14 @@ def main(args):
         elif args.train_fold == 4:
             best_eta=0.01; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=4; args.t_sampler="uniform"; args.wd =0.0001 ;args.nblock=8
 
+        ## group label gal val best
+
         regressor = ResNet1D(output_size=2, final_layers=args.final_layers).to(device)
 
         if args.reg_model_sel == "val":
-            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.wd}_eta_{best_eta}_lr_{best_lr}_nblock_{args.nblock}_{args.final_layers}-layer-clf_resnet.pt" # test best model로 변경
+            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.wd}_eta_{best_eta}_lr_{best_lr}_nblock_{args.nblock}_{args.final_layers}-layer-clf_resnet_{args.run_name}.pt" # test best model로 변경
         elif args.reg_model_sel == "last":
-            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.wd}_eta_{best_eta}_lr_{best_lr}_nblock_{args.nblock}_{args.final_layers}-layer-clf_last_resnet.pt" # test best model로 변경
+            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.wd}_eta_{best_eta}_lr_{best_lr}_nblock_{args.nblock}_{args.final_layers}-layer-clf_last_resnet_{args.run_name}.pt" # test best model로 변경
             
         model_state_dict = torch.load(model_path)['model_state_dict']
         regressor.load_state_dict(model_state_dict)
@@ -202,7 +207,7 @@ def main(args):
     else:
         sampled_seq = diffusion.sample(batch_size = 16) #TODO: hard coding
         os.makedirs(sampling_dir, exist_ok=True)
-        with open(f'{sampling_dir}/sample_{target_group}_ch_{args.d500_idx}.pkl', 'wb') as f:
+        with open(f'{sampling_dir}/sample_{target_group}.pkl', 'wb') as f:
             pickle.dump(sampled_seq, f)
     print(f"Data sampled at {sampling_dir}")
     #------------------------------------- Visualize --------------------------------------
@@ -216,6 +221,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="generate ppg with regressor guidance")
     parser.add_argument("--seed", type=int, default=1000, help="random seed (default: 1000)")
     parser.add_argument("--device", type=str, default='cuda')
+    parser.add_argument("--run_name", type=str, default='normal')
     parser.add_argument("--ignore_wandb", action='store_true',
         help = "Stop using wandb (Default : False)")
     parser.add_argument("--visualize", action='store_true',
@@ -231,7 +237,6 @@ if __name__ == '__main__':
     parser.add_argument("--benchmark", type=str, default='bcg')
     parser.add_argument("--train_fold", type=int, default=0)
     parser.add_argument("--channels", type=int, default=1)
-    parser.add_argument("--d500_idx", type=int, default=1, choices=[1,2,3,4,5,6])
 
     ## Model ---------------------------------------------------
     parser.add_argument("--disable_guidance", action='store_true',

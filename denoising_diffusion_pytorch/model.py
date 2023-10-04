@@ -197,7 +197,7 @@ class ResNet1D(nn.Module):
     """
     def __init__(self, in_channels=1, base_filters=32, first_kernel_size=5, kernel_size=3, stride=4, 
                         groups=2, n_block=8, output_size=2 , is_se=False, se_ch_low=4, downsample_gap=2, 
-                        increasefilter_gap=2, use_bn=True, use_do=True, self_condition=False, final_layers=1):
+                        increasefilter_gap=2, use_bn=True, use_do=True, self_condition=False, final_layers=1, concat_label_mlp=False, g_pos="rear", g_mlp_layers=3):
         super(ResNet1D, self).__init__()
         
         self.n_block = n_block
@@ -211,7 +211,9 @@ class ResNet1D(nn.Module):
         self.se_ch_low = se_ch_low
         self.channels = in_channels
         self.self_condition = self_condition
-
+        self.concat_label_mlp = concat_label_mlp
+        self.g_pos = g_pos
+        
         self.downsample_gap = downsample_gap # 2 for base model
         self.increasefilter_gap = increasefilter_gap # 4 for base model
 
@@ -275,9 +277,17 @@ class ResNet1D(nn.Module):
             nn.Linear(time_dim, time_dim),
             Lambda(lambda x: x.unsqueeze(1)) # Add a dimension at position 1
         )
-        num_groups=6
+        # num_groups=6
         # self.group_emb = nn.Embedding(num_groups, time_dim)
-        self.spdp_encoder = MLP(input_dim = 2, hidden_dim = 256, output_dim = 256, num_layers = 3)
+        if self.g_pos=="front":
+            g_mlp_dim=625
+        elif self.g_pos=="rear":
+            g_mlp_dim=256
+        if not self.concat_label_mlp :
+            self.sp_encoder = MLP(input_dim = 1, hidden_dim = g_mlp_dim, output_dim = g_mlp_dim, num_layers = g_mlp_layers)
+            self.dp_encoder = MLP(input_dim = 1, hidden_dim = g_mlp_dim, output_dim = g_mlp_dim, num_layers = g_mlp_layers)
+        else:
+            self.spdp_encoder = MLP(input_dim = 2, hidden_dim = g_mlp_dim, output_dim = g_mlp_dim, num_layers = g_mlp_layers)
         
         # Classifier
         # self.main_clf = nn.Linear(out_channels, output_size)
@@ -286,16 +296,22 @@ class ResNet1D(nn.Module):
     def forward(self, x, t=None, g=None):
         # x = x['ppg']
         assert len(x.shape) == 3
-        if t != None:
-            assert x.shape[0] == t.shape[0]
+        assert g != None
+        assert t != None
+        assert x.shape[0] == t.shape[0]
 
-            t = self.time_mlp(t)
-            assert x.shape == t.shape
-            x = x + t # t정보가 원시 diffuse image에 직접적인 정보를 준다고 판단, 초기에 t를 추가했으나 t정보가 너무 지배적이라면 다른 feature학습이 어려울 수 있음.
+        t = self.time_mlp(t)
+        assert x.shape == t.shape
+        # Condition with label g and t
+        if self.g_pos == "front":
+            if not self.concat_label_mlp :
+                t = t + self.sp_encoder(g[:,0].unsqueeze(1).type(torch.float32)).unsqueeze(1) + self.sp_encoder(g[:,1].unsqueeze(1).type(torch.float32)).unsqueeze(1)    
+            else:
+                t = t + self.spdp_encoder(g.type(torch.float32)).unsqueeze(1)
+        x = x + t 
 
         # skip batch norm if batchsize<4:
         if x.shape[0]<4:    self.use_bn = False 
-        
         # first conv
         out = self.first_block_conv(x)
         if self.use_bn:
@@ -316,8 +332,11 @@ class ResNet1D(nn.Module):
         # logger.info('final pooling', h.shape)
 
         # Condition with label g
-        if g != None:
-            h = h + self.spdp_encoder(g.type(torch.float32))
+        if self.g_pos == "rear":
+            if not self.concat_label_mlp :
+                h = h + self.sp_encoder(g[:,0].unsqueeze(1).type(torch.float32)) + self.sp_encoder(g[:,1].unsqueeze(1).type(torch.float32))    
+            else:
+                h = h + self.spdp_encoder(g.type(torch.float32))
 
         # ===== Concat x_demo
         out = self.main_clf(h)

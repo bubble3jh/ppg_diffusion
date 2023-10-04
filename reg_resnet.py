@@ -14,6 +14,7 @@ import wandb
 import numpy as np
 import pickle
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from prettytable import PrettyTable
 
 
 def cycle(dl):
@@ -28,7 +29,7 @@ def main(args):
     diffuse_time_step = args.diffusion_time_steps 
     epochs=args.train_epochs
     if not args.ignore_wandb:
-        wandb.init(entity="ppg-diffusion" ,project="ppg_regressor", config=args)
+        wandb.init(entity="ppg-diffusion" ,project="ppg_regressor", config=args, group=args.run_group)
         wandb.run.name=f"fold_{args.train_fold}_{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_nblock_{args.n_block}_{args.final_layers}-layer-clf"
     data = get_data(sampling_method='first_k',
                                     num_samples=5,
@@ -40,7 +41,7 @@ def main(args):
         args.t_scheduling, diffuse_time_step=diffuse_time_step,total_epochs=epochs, init_bias=args.init_bias, final_bias=args.final_bias
     ) 
     
-    model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_nblock_{args.n_block}_{args.final_layers}-layer-clf"
+    model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_sep_{args.concat_label_mlp}"
 
     tr_dataset = Dataset1D(data['train']['ppg'], label=data['train']['spdp'], groups=data['train']['group_label'] ,normalize=True)
     val_dataset = Dataset1D(data['valid']['ppg'], label=data['valid']['spdp'], groups=data['valid']['group_label'] ,normalize=True)
@@ -54,7 +55,8 @@ def main(args):
     #         dim_mults = (1, 2, 4, 8),
     #         channels = 1
     #     ).to(device)
-    regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=args.n_block).to(device)
+    regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=args.n_block, 
+                         concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers).to(device)
     optimizer = optim.Adam(regressor.parameters(), lr=args.init_lr, weight_decay=args.weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.T_max, eta_min=args.eta_min)
 
@@ -77,7 +79,25 @@ def main(args):
         timesteps = diffuse_time_step,
         objective = 'pred_v'
     ).to(device)
-    best_train_loss = float('inf');best_val_train_loss=float('inf');best_val_loss_sbp = float('inf');best_val_loss_dbp = float('inf');val_loss_sbp = 0;val_loss_dbp = 0
+    
+    # Initialize loss variables
+    best_train_loss = float('inf')
+    best_val_train_loss = float('inf')
+    val_loss_sbp = 0
+    val_loss_dbp = 0
+
+    # For standard validation
+    best_val_loss_sbp = float('inf')
+    best_val_loss_dbp = float('inf')
+
+    # For group average loss validation
+    best_gal_val_loss_sbp = float('inf')
+    best_gal_val_loss_dbp = float('inf')
+
+    # For worst group validation
+    best_worst_val_loss_sbp = float('inf')
+    best_worst_val_loss_dbp = float('inf')
+    
     with tqdm(initial = 0, total = epochs) as pbar:
         for i in range(epochs):
             mae_sbp_lists={}; mae_dbp_lists={}; overall_mae_sbp_list=[]; overall_mae_dbp_list=[]
@@ -102,8 +122,8 @@ def main(args):
                     group_losses[g_i.item()] = []
                 group_losses[g_i.item()].append(g_loss)
             total_loss = 0
-            for _, val in group_losses.items(): 
-                total_loss += val[0]
+            for _, value in group_losses.items(): 
+                total_loss += value[0]
             group_avg_loss = total_loss/len(group_losses.keys())
 
             overall_mae_sbp_list , overall_mae_dbp_list , mae_sbp_lists , mae_dbp_lists  = calculate_batch_mae(out, spdp, tr_dataset, g, mae_sbp_lists, mae_dbp_lists, overall_mae_sbp_list, overall_mae_dbp_list) 
@@ -117,7 +137,7 @@ def main(args):
             t_mean = t.sum().item()/len(t)
             if not args.ignore_wandb :
                 wandb.log({"train_loss": loss.item(), "t_mean": t_mean})
-            if args.loss == "normal_loss":
+            if args.loss == "ERM":
                 loss.backward()
             elif args.loss == "group_average_loss":
                 group_avg_loss.backward()
@@ -138,7 +158,7 @@ def main(args):
                     val_loss_sbp = 0
                     val_loss_dbp = 0
                     start_idx = 0
-                    for data in val_dl:  
+                    for data in val_dl:   
                         val_batch, val_spdp, val_g = data
                         val_batch = val_batch.to(device); val_spdp = val_spdp.to(device); val_g = val_g.to(device)
                    
@@ -149,24 +169,70 @@ def main(args):
                         # val_out = regressor(val_batch, val_t, val_g)
 
                         val_overall_mae_sbp_list , val_overall_mae_dbp_list , val_mae_sbp_lists , val_mae_dbp_lists  = calculate_batch_mae(val_out, val_spdp, val_dataset, val_g, val_mae_sbp_lists, val_mae_dbp_lists, val_overall_mae_sbp_list, val_overall_mae_dbp_list)
+                        
+                        start_idx += val_batch.size(0)
                     val_loss_sbp, val_loss_dbp, val_mae_sbp_lists, val_mae_dbp_lists = log_global_metrics(args, val_overall_mae_sbp_list, val_overall_mae_dbp_list, val_mae_sbp_lists, val_mae_dbp_lists, "valid")
-                   
+
+                    # Group Losses Calculate
+                    val_sbp_group_losses = {}
+                    val_dbp_group_losses = {}
+                    for group in val_mae_sbp_lists.keys():
+                        if g_i.item() not in group_losses:
+                            val_sbp_group_losses[g_i.item()] = []
+                            val_dbp_group_losses[g_i.item()] = []
+                        val_sbp_group_losses[group] = sum(val_mae_sbp_lists[group]) / len(val_mae_sbp_lists[group])
+                        val_dbp_group_losses[group] = sum(val_mae_dbp_lists[group]) / len(val_mae_dbp_lists[group])
+                    gal_val_loss_sbp = sum(val_sbp_group_losses.values())/len(val_sbp_group_losses.values())
+                    gal_val_loss_dbp = sum(val_dbp_group_losses.values())/len(val_dbp_group_losses.values())
+                    worst_val_loss_sbp = max(val_sbp_group_losses.values())
+                    worst_val_loss_dbp = max(val_dbp_group_losses.values())
                     # Best Validation Loss Update
                     if val_loss_sbp+val_loss_dbp < best_val_loss_sbp+best_val_loss_dbp:
-                        print(f"best val loss updated: sbp {val_loss_sbp:.4f} dbp {val_loss_dbp:.4f}")
+                        print(f"best erm val loss updated: sbp {val_loss_sbp:.4f} dbp {val_loss_dbp:.4f}")
                         best_val_loss_sbp = val_loss_sbp
                         best_val_loss_dbp = val_loss_dbp
-                        best_val_loss_tot = val_loss_dbp + val_loss_sbp
+                        best_erm_val_loss_tot = val_loss_dbp + val_loss_sbp
                         if not args.ignore_wandb:
                             for group in val_mae_sbp_lists.keys():
-                                wandb.run.summary[f"val_best_group_{group}_mae_sbp"] = sum(val_mae_sbp_lists[group]) / len(val_mae_sbp_lists[group])
-                                wandb.run.summary[f"val_best_group_{group}_mae_dbp"] = sum(val_mae_dbp_lists[group]) / len(val_mae_dbp_lists[group])
-                                wandb.run.summary[f"val_best_group_{group}_mae_tot"] = sum(val_mae_sbp_lists[group]) / len(val_mae_sbp_lists[group]) + sum(val_mae_dbp_lists[group]) / len(val_mae_dbp_lists[group])
+                                wandb.run.summary[f"val_erm_best_group_{group}_mae_sbp"] = val_sbp_group_losses[group]
+                                wandb.run.summary[f"val_erm_best_group_{group}_mae_dbp"] = val_dbp_group_losses[group]
+                                wandb.run.summary[f"val_erm_best_group_{group}_mae_tot"] = val_sbp_group_losses[group] + val_dbp_group_losses[group]
                         best_val_train_loss = loss
                         torch.save({
                             'model_state_dict': regressor.state_dict(),
                             'optimizer_state_dict': optimizer.state_dict()
-                        }, model_path+"_resnet_gal.pt")
+                        }, model_path+f"_resnet_{args.loss}_erm.pt")
+                        
+                    if gal_val_loss_sbp+gal_val_loss_dbp < best_gal_val_loss_sbp+best_gal_val_loss_dbp:
+                        print(f"best gal val loss updated: sbp {gal_val_loss_sbp:.4f} dbp {gal_val_loss_dbp:.4f}")
+                        best_gal_val_loss_sbp = gal_val_loss_sbp
+                        best_gal_val_loss_dbp = gal_val_loss_dbp
+                        best_gal_val_loss_tot = gal_val_loss_dbp + gal_val_loss_sbp
+                        if not args.ignore_wandb:
+                            for group in val_mae_sbp_lists.keys():
+                                wandb.run.summary[f"val_gal_best_group_{group}_mae_sbp"] = val_sbp_group_losses[group]
+                                wandb.run.summary[f"val_gal_best_group_{group}_mae_dbp"] = val_dbp_group_losses[group]
+                                wandb.run.summary[f"val_gal_best_group_{group}_mae_tot"] = val_sbp_group_losses[group] + val_dbp_group_losses[group]
+                        torch.save({
+                            'model_state_dict': regressor.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict()
+                        }, model_path+f"_resnet_{args.loss}_gal.pt")
+                        
+                    if worst_val_loss_sbp + worst_val_loss_dbp < best_worst_val_loss_sbp + best_worst_val_loss_dbp:
+                        print(f"best worst val loss updated: sbp {worst_val_loss_sbp:.4f} dbp {worst_val_loss_dbp:.4f}")
+                        best_worst_val_loss_sbp = worst_val_loss_sbp
+                        best_worst_val_loss_dbp = worst_val_loss_dbp
+                        best_worst_val_loss_tot = worst_val_loss_dbp + worst_val_loss_sbp
+                        if not args.ignore_wandb:
+                            for group in val_mae_sbp_lists.keys():
+                                wandb.run.summary[f"val_worst_best_group_{group}_mae_sbp"] = val_sbp_group_losses[group]
+                                wandb.run.summary[f"val_worst_best_group_{group}_mae_dbp"] = val_dbp_group_losses[group]
+                                wandb.run.summary[f"val_worst_best_group_{group}_mae_tot"] = val_sbp_group_losses[group] + val_dbp_group_losses[group]
+                        torch.save({
+                            'model_state_dict': regressor.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict()
+                        }, model_path+f"_resnet_{args.loss}_worst.pt")
+                    
             pbar.set_description(f'tr_loss: {loss:.4f} | tr_sbp_mae: {overall_mae_sbp:.4f} | tr_dbp_mae: {overall_mae_dbp:.4f} | val_sbp_mae: {val_loss_sbp:.4f} | val_dbp_mae: {val_loss_dbp:.4f} | t: {t_mean:.1f}')
             pbar.update(1)
     torch.save({
@@ -178,7 +244,9 @@ def main(args):
         wandb.run.summary["best_val_train_loss"] = best_val_train_loss
         wandb.run.summary["best_val_loss_sbp"] = best_val_loss_sbp
         wandb.run.summary["best_val_loss_dbp"] = best_val_loss_dbp
-        wandb.run.summary["best_val_loss_tot"] = best_val_loss_tot
+        wandb.run.summary["best_erm_val_loss_tot"] = best_erm_val_loss_tot
+        wandb.run.summary["best_gal_val_loss_tot"] = best_gal_val_loss_tot
+        wandb.run.summary["best_worst_val_loss_tot"] = best_worst_val_loss_tot
         wandb.run.summary["best_train_loss_sbp"] = overall_mae_sbp
         wandb.run.summary["best_train_loss_dbp"] = overall_mae_dbp
     print(f'best_val_loss_sbp: {best_val_loss_sbp:.4f} | best_val_loss_dbp: {best_val_loss_dbp:.4f} | tr_mae_sbp: {overall_mae_sbp:.4f} | tr_mae_dbp: {overall_mae_dbp:.4f}')
@@ -189,6 +257,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="generate ppg with regressor guidance")
     parser.add_argument("--seed", type=int, default=1000, help="random seed (default: 1000)")
     parser.add_argument("--device", type=str, default='cuda')
+    parser.add_argument("--run_group", type=str, default='default')
     parser.add_argument("--ignore_wandb", action='store_true',
         help = "Stop using wandb (Default : False)")
 
@@ -203,8 +272,12 @@ if __name__ == '__main__':
     ## Model ---------------------------------------------------
     parser.add_argument("--load_checkpoint", action='store_true',
         help = "Resume model training (Default : False)")
+    parser.add_argument("--concat_label_mlp", action='store_true',
+        help = "concat label mlp (Default : False)")
     parser.add_argument("--final_layers", type=int, default=3)
+    parser.add_argument("--g_mlp_layers", type=int, default=3)
     parser.add_argument("--n_block", type=int, default=8)
+    parser.add_argument("--g_pos", type=str, default='rear',  choices=["rear", "front"])
     
     ## Training ------------------------------------------------
     parser.add_argument("--diffusion_time_steps", type=int, default=2000)
@@ -214,7 +287,7 @@ if __name__ == '__main__':
     parser.add_argument("--init_bias", type=float, default=0.2)
     parser.add_argument("--final_bias", type=float, default=1)
     parser.add_argument("--optim", type=str, default='adam')
-    parser.add_argument("--loss", type=str, default='normal_loss',  choices=["normal_loss", "group_average_loss"])
+    parser.add_argument("--loss", type=str, default='group_average_loss',  choices=["ERM", "group_average_loss"])
     parser.add_argument("--t_scheduling", type=str, default="uniform",  choices=["loss-second-moment", "uniform", "train-step"])
     parser.add_argument("--T_max", type=int, default=2000)  
     parser.add_argument("--eta_min", type=float, default=0)  
@@ -224,5 +297,12 @@ if __name__ == '__main__':
                         help="0(hyp0) 1(normal) 2(perhyper) 3(hyper2) 4(crisis) (Default : 1 (normal))")
     args = parser.parse_args()
 
+    table = PrettyTable()
+    table.field_names = ["Parameter", "Value"]
+    for arg in vars(args):
+        table.add_row([arg.replace('_', ' ').title(), getattr(args, arg)])
+
+    print("Hyperparameters Configuration:")
+    print(table)
     main(args)
 

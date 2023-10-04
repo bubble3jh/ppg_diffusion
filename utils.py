@@ -198,13 +198,14 @@ def load_fold_np(fold_num, root='../data/bcg_dataset'):
         return torch.from_numpy(ppg_numpy_data), torch.from_numpy(spdp_numpy_data)
 
 def get_sample_batch_size(data, target_group):
-    unique_elements, counts = torch.unique(data['train']['group_label'], return_counts=True)
+    group_label = same_to_group(data['train']['group_label'])
+    unique_elements, counts = torch.unique(group_label, return_counts=True)
 
     max_count = torch.max(counts).item()
     
     target_count = counts[unique_elements == target_group].item() if target_group in unique_elements else 0
     print(f"max count : {max_count}, target count : {target_count}")
-
+    
     return max_count - target_count
 
 class Lambda(nn.Module):
