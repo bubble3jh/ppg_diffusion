@@ -12,8 +12,8 @@ api = wandb.Api()
 # 프로젝트의 모든 실행을 불러옴
 runs = api.runs(f"{entity_name}/{project_name}")
 timestamp_threshold = datetime.fromisoformat('2023-09-29T00:00:00+00:00').timestamp()
-group_name = "g_label_sweep_gal"
-best_model_selection = "best_worst_val_loss_tot"
+group_name = "train_param_sweep_gal"
+best_model_selection = "best_gal_val_loss_tot"
 # 각 실행에서 특정 두 값의 합을 계산하고 저장
 for target_fold in [0,1,2,3,4]:
     passed = 0

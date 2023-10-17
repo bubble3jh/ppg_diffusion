@@ -8,11 +8,12 @@ import pandas as pd
 from denoising_diffusion_pytorch.model import Classifier, Regressor, Unet1DEncoder, ResNet1D
 from denoising_diffusion_pytorch.cond_fn import classifier_cond_fn, regressor_cond_fn
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch_1d_guided import Unet1D, GaussianDiffusion1D, Trainer1D, Dataset1D
-from utils import visualize, sample_sbp_dbp, get_data, get_sample_batch_size
+from utils import visualize, sample_sbp_dbp, get_data, get_sample_batch_size, get_reg_modelpath
 import paths
 
 def generate_diffusion_sequence(args, data, dataset, device, diffusion, regressor_cond_fn, regressor, sampling_dir, target_group):
     sample_batch_size = args.sample_batch_size if args.sample_batch_size is not None else get_sample_batch_size(data, target_group)
+    sample_batch_size = 2048 # TODO : 2048개씩 왕창 다만들기
     if sample_batch_size == 0:
         os.makedirs(sampling_dir, exist_ok=True)
         with open(f'{sampling_dir}/skipped_{target_group}.pkl', 'wb') as f:
@@ -54,7 +55,7 @@ def generate_diffusion_sequence(args, data, dataset, device, diffusion, regresso
             'y': torch.cat(ori_y_list, dim=0)
         }
         print(f"Sampling completed for target group {target_group}\nat {sampling_dir}")
-        with open(f'{sampling_dir}/sample_{args.run_name}_{target_group}.pkl', 'wb') as f:
+        with open(f'{sampling_dir}/sample_{args.reg_train_loss}_{target_group}.pkl', 'wb') as f:
             pickle.dump(result, f)
             
     except RuntimeError as e:
@@ -86,7 +87,7 @@ def main(args):
     sampling_root = paths.SAMPLING_ROOT
     if not args.disable_guidance:
         train_setting = train_setting + "_guided"
-    sampling_name = train_setting + f'_train_lr_{args.train_lr}_reg_sel_{args.reg_model_sel}'
+    sampling_name = train_setting + f'_train_lr_{args.train_lr}_reg_set_{args.reg_selection_dataset}_tr_{args.reg_train_loss}_sel_{args.reg_selection_loss}'
     sampling_dir = os.path.join(sampling_root, sampling_name)
 
     #------------------------------------ Load Data --------------------------------------
@@ -138,42 +139,14 @@ def main(args):
 
     # resnet ------
     if not args.disable_guidance:
-        ## val best
-        # if args.train_fold == 0:
-        #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="loss-second-moment"
-        # elif args.train_fold == 1:
-        #     best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="train-step"
-        # elif args.train_fold == 2:
-        #     best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="uniform"
-        # elif args.train_fold == 3:
-        #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
-        # elif args.train_fold == 4:
-        #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
-        
-        ## gal val best
-        if args.train_fold == 0:
-            best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=12; args.t_sampler="train-step"; args.wd =0.0001 ;args.nblock=8
-        elif args.train_fold == 1:
-            best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=4; args.t_sampler="train-step"; args.wd =0.0001 ;args.nblock=8
-        elif args.train_fold == 2:
-            best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=4; args.t_sampler="train-step"; args.wd =0.001 ;args.nblock=8
-        elif args.train_fold == 3:
-            best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="train-step"; args.wd =0.001 ;args.nblock=8
-        elif args.train_fold == 4:
-            best_eta=0.01; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=4; args.t_sampler="uniform"; args.wd =0.0001 ;args.nblock=8
-
-        ## group label gal val best
-
-        regressor = ResNet1D(output_size=2, final_layers=args.final_layers).to(device)
-
-        if args.reg_model_sel == "val":
-            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.wd}_eta_{best_eta}_lr_{best_lr}_nblock_{args.nblock}_{args.final_layers}-layer-clf_resnet_{args.run_name}.pt" # test best model로 변경
-        elif args.reg_model_sel == "last":
-            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_sampler}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.wd}_eta_{best_eta}_lr_{best_lr}_nblock_{args.nblock}_{args.final_layers}-layer-clf_last_resnet_{args.run_name}.pt" # test best model로 변경
-            
+        model_path, args = get_reg_modelpath(args)
+        # regressor = ResNet1D(output_size=2, final_layers=args.final_layers).to(device)
+        regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=8, 
+                            concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers).to(device)
         model_state_dict = torch.load(model_path)['model_state_dict']
         regressor.load_state_dict(model_state_dict)
         regressor.eval()
+        print("regressor model load complete")
 
     #------------------------------------- Training --------------------------------------
     
@@ -221,7 +194,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="generate ppg with regressor guidance")
     parser.add_argument("--seed", type=int, default=1000, help="random seed (default: 1000)")
     parser.add_argument("--device", type=str, default='cuda')
-    parser.add_argument("--run_name", type=str, default='normal')
     parser.add_argument("--ignore_wandb", action='store_true',
         help = "Stop using wandb (Default : False)")
     parser.add_argument("--visualize", action='store_true',
@@ -241,11 +213,14 @@ if __name__ == '__main__':
     ## Model ---------------------------------------------------
     parser.add_argument("--disable_guidance", action='store_true',
         help = "Stop using guidance (Default : False)")
-    parser.add_argument("--reg_model_sel", type=str, default='val')
+    parser.add_argument("--reg_train_loss", type=str, default='group_average_loss')
+    parser.add_argument("--reg_selection_dataset", type=str, default='val')
+    parser.add_argument("--reg_selection_loss", type=str, default='gal',  choices=["erm", "gal", "worst"])
+    
 
     ## Training ------------------------------------------------
     parser.add_argument("--diffusion_time_steps", type=int, default=2000)
-    parser.add_argument("--train_num_steps", type=int, default=16)
+    parser.add_argument("--train_num_steps", type=int, default=32)
     parser.add_argument("--train_lr", type=float, default=8e-5)
     parser.add_argument("--optim", type=str, default='adam')
     parser.add_argument("--dropout", type=float, default=0)

@@ -216,6 +216,346 @@ class Lambda(nn.Module):
     def forward(self, x):
         return self.func(x)
     
+def get_reg_modelpath(args):
+    # --- before label model modified----
+    ## val best
+    # if args.train_fold == 0:
+    #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="loss-second-moment"
+    # elif args.train_fold == 1:
+    #     best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="train-step"
+    # elif args.train_fold == 2:
+    #     best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="uniform"
+    # elif args.train_fold == 3:
+    #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
+    # elif args.train_fold == 4:
+    #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=2; args.t_sampler="uniform"
+    
+    ## gal val best
+    # if args.train_fold == 0:
+    #     best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=12; args.t_sampler="train-step"; args.wd =0.0001 ;args.nblock=8
+    # elif args.train_fold == 1:
+    #     best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=4; args.t_sampler="train-step"; args.wd =0.0001 ;args.nblock=8
+    # elif args.train_fold == 2:
+    #     best_eta=0.01; best_lr=0.001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=4; args.t_sampler="train-step"; args.wd =0.001 ;args.nblock=8
+    # elif args.train_fold == 3:
+    #     best_eta=0.01; best_lr=1e-05; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=3; args.t_sampler="train-step"; args.wd =0.001 ;args.nblock=8
+    # elif args.train_fold == 4:
+    #     best_eta=0.01; best_lr=0.0001; args.regressor_epoch=2000; args.diffusion_time_steps=2000; args.final_layers=4; args.t_sampler="uniform"; args.wd =0.0001 ;args.nblock=8
+    # ----------------------------------
+
+    ## group average loss trained + group label mlp modified
+    # best worst val
+
+    if args.reg_selection_loss == "worst":
+        # if args.train_fold == 0:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 2
+        #     args.final_layers = 12
+        #     args.eta_min = 0.01
+        #     args.init_lr = 1e-05
+        #     args.g_pos = "front"
+        #     args.concat_label_mlp = False
+        #     args.weight_decay = 0.0001
+
+        # elif args.train_fold == 1:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 4
+        #     args.final_layers = 4
+        #     args.eta_min = 0.01
+        #     args.init_lr = 1e-05
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = True
+        #     args.weight_decay = 0.0001
+
+        # elif args.train_fold == 2:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 2
+        #     args.final_layers = 4
+        #     args.eta_min = 0.01
+        #     args.init_lr = 0.001
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = True
+        #     args.weight_decay = 0.001
+
+        # elif args.train_fold == 3:
+        #     args.t_scheduling = "uniform"
+        #     args.g_mlp_layers = 4
+        #     args.final_layers = 3
+        #     args.eta_min = 0.01
+        #     args.init_lr = 1e-05
+        #     args.g_pos = "front"
+        #     args.concat_label_mlp = False
+        #     args.weight_decay = 0.001
+
+        # elif args.train_fold == 4:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 4
+        #     args.final_layers = 4
+        #     args.eta_min = 0.01
+        #     args.init_lr = 0.0001
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = True
+        #     args.weight_decay = 0.0001
+        if args.train_fold == 0:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 2
+            args.final_layers = 4
+            args.eta_min = 0.001
+            args.init_lr = 0.0001
+            args.g_pos = "front"
+            args.concat_label_mlp = False
+            args.weight_decay = 0.0001
+
+        elif args.train_fold == 1:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 4
+            args.final_layers = 4
+            args.eta_min = 0.001
+            args.init_lr = 0.0001
+            args.g_pos = "rear"
+            args.concat_label_mlp = True
+            args.weight_decay = 0.001
+
+        elif args.train_fold == 2:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 2
+            args.final_layers = 4
+            args.eta_min = 0.001
+            args.init_lr = 0.0001
+            args.g_pos = "rear"
+            args.concat_label_mlp = True
+            args.weight_decay = 0.0001
+
+        elif args.train_fold == 3:
+            args.t_scheduling = "uniform"
+            args.g_mlp_layers = 4
+            args.final_layers = 4
+            args.eta_min = 0.01
+            args.init_lr = 0.001
+            args.g_pos = "front"
+            args.concat_label_mlp = False
+            args.weight_decay = 0.0001
+
+        elif args.train_fold == 4:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 4
+            args.final_layers = 4
+            args.eta_min = 0.01
+            args.init_lr = 0.00001
+            args.g_pos = "rear"
+            args.concat_label_mlp = True
+            args.weight_decay = 0.001
+
+
+    # best erm val
+    if args.reg_selection_loss == "erm":
+        # if args.train_fold == 0:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 2
+        #     args.final_layers = 12
+        #     args.eta_min = 0.01
+        #     args.init_lr = 1e-05
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = True
+        #     args.weight_decay = 0.001
+
+        # elif args.train_fold == 1:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 4
+        #     args.final_layers = 4
+        #     args.eta_min = 0.001
+        #     args.init_lr = 0.0001
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = True
+        #     args.weight_decay = 0.001
+
+        # elif args.train_fold == 2:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 2
+        #     args.final_layers = 4
+        #     args.eta_min = 0.001
+        #     args.init_lr = 0.001
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = True
+        #     args.weight_decay = 0.0001
+
+        # elif args.train_fold == 3:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 2
+        #     args.final_layers = 12
+        #     args.eta_min = 0.001
+        #     args.init_lr = 1e-05
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = False
+        #     args.weight_decay = 0.0001
+
+        # elif args.train_fold == 4:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 2
+        #     args.final_layers = 4
+        #     args.eta_min = 0.01
+        #     args.init_lr = 0.0001
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = True
+        #     args.weight_decay = 0.001
+        if args.train_fold == 0:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 2
+            args.final_layers = 12
+            args.eta_min = 0.01
+            args.init_lr = 0.00001
+            args.g_pos = "rear"
+            args.concat_label_mlp = True
+            args.weight_decay = 0.001
+
+        elif args.train_fold == 1:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 4
+            args.final_layers = 4
+            args.eta_min = 0.001
+            args.init_lr = 0.0001
+            args.g_pos = "rear"
+            args.concat_label_mlp = True
+            args.weight_decay = 0.001
+
+        elif args.train_fold == 2:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 2
+            args.final_layers = 4
+            args.eta_min = 0.001
+            args.init_lr = 0.001
+            args.g_pos = "rear"
+            args.concat_label_mlp = True
+            args.weight_decay = 0.0001
+
+        elif args.train_fold == 3:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 2
+            args.final_layers = 12
+            args.eta_min = 0.001
+            args.init_lr = 0.00001
+            args.g_pos = "rear"
+            args.concat_label_mlp = False
+            args.weight_decay = 0.0001
+
+        elif args.train_fold == 4:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 2
+            args.final_layers = 4
+            args.eta_min = 0.01
+            args.init_lr = 0.0001
+            args.g_pos = "rear"
+            args.concat_label_mlp = True
+            args.weight_decay = 0.001
+
+
+    # best gal val
+    if args.reg_selection_loss == "gal":
+        # if args.train_fold == 0:
+        #     args.t_scheduling = "uniform"
+        #     args.g_mlp_layers = 2
+        #     args.final_layers = 4
+        #     args.eta_min = 0.01
+        #     args.init_lr = 0.001
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = True
+        #     args.weight_decay = 0.0001
+
+        # elif args.train_fold == 1:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 4
+        #     args.final_layers = 4
+        #     args.eta_min = 0.001
+        #     args.init_lr = 0.0001
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = True
+        #     args.weight_decay = 0.001
+
+        # elif args.train_fold == 2:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 2
+        #     args.final_layers = 4
+        #     args.eta_min = 0.001
+        #     args.init_lr = 0.001
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = True
+        #     args.weight_decay = 0.0001
+
+        # elif args.train_fold == 3:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 2
+        #     args.final_layers = 12
+        #     args.eta_min = 0.001
+        #     args.init_lr = 0.0001
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = False
+        #     args.weight_decay = 0.001
+
+        # elif args.train_fold == 4:
+        #     args.t_scheduling = "train-step"
+        #     args.g_mlp_layers = 4
+        #     args.final_layers = 4
+        #     args.eta_min = 0.01
+        #     args.init_lr = 1e-05
+        #     args.g_pos = "rear"
+        #     args.concat_label_mlp = True
+        #     args.weight_decay = 0.001
+        if args.train_fold == 0:
+            args.t_scheduling = "uniform"
+            args.g_mlp_layers = 2
+            args.final_layers = 4
+            args.eta_min = 0.01
+            args.init_lr = 0.001
+            args.g_pos = "rear"
+            args.concat_label_mlp = True
+            args.weight_decay = 0.0001
+
+        elif args.train_fold == 1:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 4
+            args.final_layers = 4
+            args.eta_min = 0.001
+            args.init_lr = 0.0001
+            args.g_pos = "rear"
+            args.concat_label_mlp = True
+            args.weight_decay = 0.001
+
+        elif args.train_fold == 2:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 2
+            args.final_layers = 4
+            args.eta_min = 0.001
+            args.init_lr = 0.001
+            args.g_pos = "rear"
+            args.concat_label_mlp = True
+            args.weight_decay = 0.0001
+
+        elif args.train_fold == 3:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 2
+            args.final_layers = 12
+            args.eta_min = 0.001
+            args.init_lr = 0.0001
+            args.g_pos = "rear"
+            args.concat_label_mlp = False
+            args.weight_decay = 0.001
+
+        elif args.train_fold == 4:
+            args.t_scheduling = "train-step"
+            args.g_mlp_layers = 4
+            args.final_layers = 4
+            args.eta_min = 0.01
+            args.init_lr = 0.00001
+            args.g_pos = "rear"
+            args.concat_label_mlp = True
+            args.weight_decay = 0.001
+    # group average loss trained model load
+    if args.reg_selection_dataset == "val":
+        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_cat_{str(args.concat_label_mlp)}_resnet_{args.reg_train_loss}_{args.reg_selection_loss}.pt" # test best model로 변경
+    elif args.reg_selection_dataset == "last":
+        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_cat_{str(args.concat_label_mlp)}_last_resnet_{args.reg_selection_loss}.pt" # test best model로 변경
+        
+    return model_path, args
 
 # Batch-wise MAE 계산 함수
 def calculate_batch_mae(model_output, ground_truth, dataset, group, mae_sbp_lists, mae_dbp_lists, overall_mae_sbp_list, overall_mae_dbp_list):

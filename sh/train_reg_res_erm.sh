@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GPU_IDS=(0 1 2 3)  # 사용할 GPU ID 리스트
+GPU_IDS=(6 7)  # 사용할 GPU ID 리스트
 IDX=0
 loss="group_average_loss"
 run_group="train_param_sweep_erm"

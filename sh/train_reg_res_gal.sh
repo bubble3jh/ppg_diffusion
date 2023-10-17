@@ -1,16 +1,16 @@
 #!/bin/bash
 
-GPU_IDS=(0 1 2 3)  # 사용할 GPU ID 리스트
+GPU_IDS=(4 5)  # 사용할 GPU ID 리스트
 IDX=0
 loss="group_average_loss"
-run_group="train_param_sweep_worst"
+run_group="train_param_sweep_gal"
 for train_fold in 0 1 2 3 4
 do
   # Set hyperparameters based on train_fold
   if [ $train_fold -eq 0 ]; then
     g_pos="rear"
-    t_scheduling="train-step"
-    final_layers=12
+    t_scheduling="uniform"
+    final_layers=4
     g_mlp_layers=2
     concat_label_mlp="--concat_label_mlp"
   elif [ $train_fold -eq 1 ]; then
@@ -35,7 +35,7 @@ do
     g_pos="rear"
     t_scheduling="train-step"
     final_layers=4
-    g_mlp_layers=2
+    g_mlp_layers=4
     concat_label_mlp="--concat_label_mlp"
   fi
 
@@ -81,4 +81,4 @@ do
   done
 done
 
-wait
+wait  # 마지막 배치의 모든 작업이 완료될 때까지 기다림
