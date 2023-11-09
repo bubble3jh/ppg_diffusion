@@ -154,3 +154,23 @@ class BasicBlock(nn.Module):
         out += identity
 
         return out
+    
+class SE_Block(nn.Module):
+    "credits: https://github.com/moskomule/senet.pytorch/blob/master/senet/se_module.py#L4"
+    def __init__(self, c, r=16, se_ch_low=4):
+        super().__init__()
+        h = c // r
+        if h<4: h = se_ch_low
+        self.squeeze = nn.AdaptiveAvgPool1d(1)
+        self.excitation = nn.Sequential(
+            nn.Linear(c, h, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(h, c, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        bs, c, _ = x.shape
+        y = self.squeeze(x).view(bs, c)
+        y = self.excitation(y).view(bs, c, 1)
+        return x * y.expand_as(x)

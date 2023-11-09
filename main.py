@@ -87,7 +87,7 @@ def main(args):
     sampling_root = paths.SAMPLING_ROOT
     if not args.disable_guidance:
         train_setting = train_setting + "_guided"
-    sampling_name = train_setting + f'_train_lr_{args.train_lr}_reg_set_{args.reg_selection_dataset}_tr_{args.reg_train_loss}_sel_{args.reg_selection_loss}'
+    sampling_name = train_setting + f'_train_lr_{args.train_lr}_reg_set_{args.reg_selection_dataset}_tr_{args.reg_train_loss}_sel_{args.reg_selection_loss}_gs_{args.regressor_scale}'
     sampling_dir = os.path.join(sampling_root, sampling_name)
 
     #------------------------------------ Load Data --------------------------------------
@@ -140,9 +140,11 @@ def main(args):
     # resnet ------
     if not args.disable_guidance:
         model_path, args = get_reg_modelpath(args)
+        # model_path = '/mlainas/ETRI_2023/reg_model/fold_0/train-step_epoch_2000_diffuse_2000_wd_0.0001_eta_0_lr_0.0001_3_final_no_group_label_resnet_group_average_loss_erm.pt'
         # regressor = ResNet1D(output_size=2, final_layers=args.final_layers).to(device)
         regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=8, 
-                            concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers).to(device)
+                            concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers, disable_g=False).to(device)
+        # regressor = ResNet1D(output_size=2, disable_g=True).to(device) #  disable_g=True
         model_state_dict = torch.load(model_path)['model_state_dict']
         regressor.load_state_dict(model_state_dict)
         regressor.eval()

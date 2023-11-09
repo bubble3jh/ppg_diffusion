@@ -40,10 +40,8 @@ def main(args):
     schedule_sampler = create_named_schedule_sampler(
         args.t_scheduling, diffuse_time_step=diffuse_time_step,total_epochs=epochs, init_bias=args.init_bias, final_bias=args.final_bias
     ) 
-    if args.disable_g :
-        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_no_group_label"
-    else:
-        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_cat_{args.concat_label_mlp}"
+    
+    model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_cat_{args.concat_label_mlp}"
 
     tr_dataset = Dataset1D(data['train']['ppg'], label=data['train']['spdp'], groups=data['train']['group_label'] ,normalize=True)
     val_dataset = Dataset1D(data['valid']['ppg'], label=data['valid']['spdp'], groups=data['valid']['group_label'] ,normalize=True)
@@ -57,9 +55,8 @@ def main(args):
     #         dim_mults = (1, 2, 4, 8),
     #         channels = 1
     #     ).to(device)
-    regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=args.n_block, use_bn=False,
-                         concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers, disable_g=args.disable_g).to(device)
-    print(regressor)
+    regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=args.n_block, 
+                         concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers).to(device)
     optimizer = optim.Adam(regressor.parameters(), lr=args.init_lr, weight_decay=args.weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.T_max, eta_min=args.eta_min)
 
@@ -277,8 +274,6 @@ if __name__ == '__main__':
         help = "Resume model training (Default : False)")
     parser.add_argument("--concat_label_mlp", action='store_true',
         help = "concat label mlp (Default : False)")
-    parser.add_argument("--disable_g", action='store_true',
-        help = "disable_group_label (Default : False)")
     parser.add_argument("--final_layers", type=int, default=3)
     parser.add_argument("--g_mlp_layers", type=int, default=3)
     parser.add_argument("--n_block", type=int, default=8)
@@ -293,7 +288,7 @@ if __name__ == '__main__':
     parser.add_argument("--final_bias", type=float, default=1)
     parser.add_argument("--optim", type=str, default='adam')
     parser.add_argument("--loss", type=str, default='group_average_loss',  choices=["ERM", "group_average_loss"])
-    parser.add_argument("--t_scheduling", type=str, default="train-step",  choices=["loss-second-moment", "uniform", "train-step"])
+    parser.add_argument("--t_scheduling", type=str, default="uniform",  choices=["loss-second-moment", "uniform", "train-step"])
     parser.add_argument("--T_max", type=int, default=2000)  
     parser.add_argument("--eta_min", type=float, default=0)  
 
