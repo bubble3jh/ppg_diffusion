@@ -3,6 +3,8 @@ GPU_IDS=(1 2 5 6 7)  # 사용할 GPU ID 리스트
 IDX=0
 benchmark="ppgbp"
 run_group="ppgbp_w/o_group_label_adamw"
+for benchmark in "ppgbp" "sensors"
+do
 for train_fold in 0 1 2 3 4
 do
 for train_epochs in 1000
@@ -54,6 +56,7 @@ IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))
 if [ $IDX -eq 0 ]; then
   wait
 fi
+done
 done
 done
 done
