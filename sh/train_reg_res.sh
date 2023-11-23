@@ -1,6 +1,7 @@
 #!/bin/bash
 GPU_IDS=(1 2 5 6 7)  # 사용할 GPU ID 리스트
 IDX=0
+benchmark="ppgbp"
 run_group="ppgbp_w/o_group_label_adamw"
 for train_fold in 0 1 2 3 4
 do
@@ -9,8 +10,6 @@ do
 for diffusion_time_steps in 2000
 do
 for loss in "group_average_loss" "ERM"
-do
-for benchmark in "sensors"
 do
 for eta_min in 0.001 #0.01
 do
@@ -55,7 +54,6 @@ IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))
 if [ $IDX -eq 0 ]; then
   wait
 fi
-done
 done
 done
 done

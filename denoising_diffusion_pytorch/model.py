@@ -197,7 +197,7 @@ class ResNet1D(nn.Module):
     """
     def __init__(self, in_channels=1, base_filters=32, first_kernel_size=5, kernel_size=3, stride=4, 
                         groups=2, n_block=8, output_size=2 , is_se=False, se_ch_low=4, downsample_gap=2, 
-                        increasefilter_gap=2, use_bn=True, use_do=True, self_condition=False, final_layers=3, disable_g=True, concat_label_mlp=False, g_pos="rear", g_mlp_layers=3, time_linear=False, auxilary_classification=False, do_rate=0.5):
+                        increasefilter_gap=2, use_bn=True, use_do=True, self_condition=False, final_layers=3, disable_g=True, concat_label_mlp=False, g_pos="rear", g_mlp_layers=3, time_linear=False, auxilary_classification=False, do_rate=0.5, seq_length=625):
         super(ResNet1D, self).__init__()
         
         self.n_block = n_block
@@ -271,7 +271,7 @@ class ResNet1D(nn.Module):
         self.final_relu = nn.ReLU(inplace=True)
 
         # condtional layer
-        fourier_dim = 256; time_dim = 625
+        fourier_dim = 256; time_dim = seq_length
         sinu_pos_emb = SinusoidalPosEmb(fourier_dim)
         if time_linear:
             self.time_layer = nn.Sequential(
@@ -292,7 +292,7 @@ class ResNet1D(nn.Module):
             # num_groups=6
             # self.group_emb = nn.Embedding(num_groups, time_dim)
             if self.g_pos=="front":
-                g_mlp_dim=625
+                g_mlp_dim=seq_length
             elif self.g_pos=="rear":
                 g_mlp_dim=256
             if not self.concat_label_mlp :

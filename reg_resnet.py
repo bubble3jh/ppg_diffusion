@@ -59,9 +59,13 @@ def main(args):
     #         dim_mults = (1, 2, 4, 8),
     #         channels = 1
     #     ).to(device)
+    if args.benchmark == "ppgbp":
+        seq_length=262
+    else:
+        seq_length=625
     regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=args.n_block, is_se=args.is_se, use_bn=True, use_do=True,
                          concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers, disable_g=args.disable_g, 
-                         time_linear=args.time_linear, auxilary_classification=args.auxilary_classification, do_rate=args.do_rate).to(device)
+                         time_linear=args.time_linear, auxilary_classification=args.auxilary_classification, do_rate=args.do_rate, seq_length=seq_length).to(device)
     optimizer = optim.AdamW(regressor.parameters(), lr=args.init_lr, weight_decay=args.weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.T_max, eta_min=args.eta_min)
 
@@ -80,7 +84,7 @@ def main(args):
     # regressor.load_state_dict(weight)
     diffusion = GaussianDiffusion1D(
         model = regressor,
-        seq_length = 625,
+        seq_length = args.seq_length,
         timesteps = diffuse_time_step,
         objective = 'pred_v'
     ).to(device)
