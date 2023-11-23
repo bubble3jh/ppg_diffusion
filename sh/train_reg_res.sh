@@ -1,7 +1,7 @@
 #!/bin/bash
-GPU_IDS=(0 1 2 3 4 5)  # 사용할 GPU ID 리스트
+GPU_IDS=(1 2 5 6 7)  # 사용할 GPU ID 리스트
 IDX=0
-run_group="w/o_group_label_adamw"
+run_group="ppgbp_w/o_group_label_adamw"
 for train_fold in 0 1 2 3 4
 do
 for train_epochs in 1000
@@ -10,19 +10,21 @@ for diffusion_time_steps in 2000
 do
 for loss in "group_average_loss" "ERM"
 do
+for benchmark in "sensors"
+do
 for eta_min in 0.001 #0.01
 do
 for init_lr in 0.0001 0.00001 0.001
 do
 for weight_decay in 1e-1 1e-2 1e-3
 do
-for do_rate in 0.8 # 0.6 0.7
+for do_rate in 0.8 0.6 0.7
 do
 for t_scheduling in "train-step" #"loss-second-moment"
 do
 for final_layers in 2 3 # 4 8 12
 do
-for auxilary_classification in "--auxilary_classification" ""
+for auxilary_classification in "--auxilary_classification" #""
 do
 for is_se in "--is_se" ""
 do
@@ -41,8 +43,10 @@ CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} /mlainas/teang1995/anaconda3/envs/PPG/bin/
 --disable_g \
 --final_layers ${final_layers} \
 --t_scheduling ${t_scheduling} \
+--benchmark ${benchmark} \
+--ignore_wandb \
 ${is_se} \
-${auxilary_classification} & # 백그라운드에서 실행
+${auxilary_classification}  # 백그라운드에서 실행
 
 # GPU ID를 다음 것으로 변경
 IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))
@@ -51,6 +55,7 @@ IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))
 if [ $IDX -eq 0 ]; then
   wait
 fi
+done
 done
 done
 done

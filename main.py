@@ -94,10 +94,6 @@ def main(args):
 
     #------------------------------------ Load Data --------------------------------------
 
-    if args.benchmark == "bcg":
-        print("data sampling started")
-    else:
-        print(f"data sampling started, sampling method: {args.sampling_method}, num_samples for each patient: {args.num_samples}")
     data_sampling_start = time.time()
     # ppg, label = get_data(sampling_method=args.sampling_method,
     #                              num_samples=args.num_samples,
@@ -106,7 +102,7 @@ def main(args):
     data = get_data(sampling_method='first_k',
                                     num_samples=5,
                                     data_root=paths.DATA_ROOT,
-                                    benchmark='bcg',
+                                    benchmark=args.benchmark,
                                     train_fold=args.train_fold)
     # data = get_data(benchmark=args.benchmark)
     data_sampling_time = time.time() - data_sampling_start
@@ -211,7 +207,7 @@ if __name__ == '__main__':
     parser.add_argument("--min_max", action='store_false',
         help = "Min-Max normalize data (Default : True)")
     parser.add_argument("--benchmark", type=str, default='bcg')
-    parser.add_argument("--train_fold", type=int, default=0)
+    parser.add_argument("--train_fold", type=int, default=-1)
     parser.add_argument("--channels", type=int, default=1)
 
     ## Model ---------------------------------------------------

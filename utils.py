@@ -105,7 +105,8 @@ def get_data(sampling_method='first_k',
              train_fold = 0,
              group_mode="same",
              d500_idx=0):
-    if benchmark=='bcg':
+    
+    if benchmark=='bcg' or benchmark=='ppgbp' or benchmark=='sensors':
         if train_fold == 0:
             fold_nums = [0,1,4]
             val_fold = 3
@@ -121,15 +122,18 @@ def get_data(sampling_method='first_k',
         elif train_fold == 4:
             fold_nums = [0,1,3]
             val_fold = 2
+        elif train_fold == -1:
+            fold_nums = [0,1,2,3,4]
+            val_fold = 0
         data = {"train": {},
                 "valid": {} }
         # train
-        ppgs_tensor, spdps_tensor, group_labels = fold_data(fold_nums, group_mode)
+        ppgs_tensor, spdps_tensor, group_labels = fold_data(fold_nums, group_mode, dataset=benchmark)
         data['train']['ppg'] = ppgs_tensor
         data['train']['spdp'] = spdps_tensor
         data['train']['group_label'] = group_labels
         # valid
-        ppgs_tensor, spdps_tensor, group_labels = fold_data([val_fold], group_mode)
+        ppgs_tensor, spdps_tensor, group_labels = fold_data([val_fold], group_mode, dataset=benchmark)
         data['valid']['ppg'] = ppgs_tensor
         data['valid']['spdp'] = spdps_tensor
         data['valid']['group_label'] = group_labels
@@ -162,13 +166,12 @@ def get_data(sampling_method='first_k',
     elif benchmark == 'd500':
         return torch.load(f'/data1/bubble3jh/ppg/data/six_ch/d500_sliced_{d500_idx}.pth')
     
-def fold_data(fold_nums, group_mode):
+def fold_data(fold_nums, group_mode, dataset='bcg'):
     ppgs, spdps, group_labels = [], [], []
     count = 0
     for fold_num in fold_nums:
-        ppg, spdp = load_fold_np(fold_num=fold_num)
+        ppg, spdp = load_fold_np(fold_num=fold_num, root=f'/mlainas/ETRI_2023/splitted/{dataset}_dataset')
         ppg = torch.permute(ppg, (1,0,2))
-    
         sbp = spdp[0, :, 0].squeeze()
         dbp = spdp[1, :, 0].squeeze()
         # Assign group labels based on sbp and dbp values

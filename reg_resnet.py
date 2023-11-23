@@ -35,7 +35,7 @@ def main(args):
     data = get_data(sampling_method='first_k',
                                     num_samples=5,
                                     data_root=paths.DATA_ROOT,
-                                    benchmark='bcg',
+                                    benchmark=args.benchmark,
                                     train_fold=args.train_fold)
     
     schedule_sampler = create_named_schedule_sampler(
@@ -43,9 +43,9 @@ def main(args):
     ) 
     
     if args.disable_g :
-        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_do_rate_{args.do_rate}_loss_{args.loss}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_no_group_label_timelayer_{time_layer}_is_se_{args.is_se}_auxilary_classifcation_{args.auxilary_classification}"
+        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_do_rate_{args.do_rate}_loss_{args.loss}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_no_group_label_timelayer_{time_layer}_is_se_{args.is_se}"
     else:
-        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_cat_{args.concat_label_mlp}_timelayer_{time_layer}_auxilary_classifcation_{args.auxilary_classification}"
+        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_cat_{args.concat_label_mlp}_timelayer_{time_layer}"
 
     tr_dataset = Dataset1D(data['train']['ppg'], label=data['train']['spdp'], groups=data['train']['group_label'] ,normalize=True)
     val_dataset = Dataset1D(data['valid']['ppg'], label=data['valid']['spdp'], groups=data['valid']['group_label'] ,normalize=True)
@@ -62,7 +62,6 @@ def main(args):
     regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=args.n_block, is_se=args.is_se, use_bn=True, use_do=True,
                          concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers, disable_g=args.disable_g, 
                          time_linear=args.time_linear, auxilary_classification=args.auxilary_classification, do_rate=args.do_rate).to(device)
-    print(regressor)
     optimizer = optim.AdamW(regressor.parameters(), lr=args.init_lr, weight_decay=args.weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.T_max, eta_min=args.eta_min)
 
@@ -222,7 +221,7 @@ def main(args):
                         torch.save({
                             'model_state_dict': regressor.state_dict(),
                             'optimizer_state_dict': optimizer.state_dict()
-                        }, model_path+f"_resnet_{args.loss}_erm.pt")
+                        }, model_path+f"_{args.benchmark}_resnet_{args.loss}_erm.pt")
                         
                     if gal_val_loss_sbp+gal_val_loss_dbp < best_gal_val_loss_sbp+best_gal_val_loss_dbp:
                         print(f"best gal val loss updated: sbp {gal_val_loss_sbp:.4f} dbp {gal_val_loss_dbp:.4f}")
@@ -237,7 +236,7 @@ def main(args):
                         torch.save({
                             'model_state_dict': regressor.state_dict(),
                             'optimizer_state_dict': optimizer.state_dict()
-                        }, model_path+f"_resnet_{args.loss}_gal.pt")
+                        }, model_path+f"_{args.benchmark}_resnet_{args.loss}_gal.pt")
                         
                     if worst_val_loss_sbp + worst_val_loss_dbp < best_worst_val_loss_sbp + best_worst_val_loss_dbp:
                         print(f"best worst val loss updated: sbp {worst_val_loss_sbp:.4f} dbp {worst_val_loss_dbp:.4f}")
@@ -252,14 +251,14 @@ def main(args):
                         torch.save({
                             'model_state_dict': regressor.state_dict(),
                             'optimizer_state_dict': optimizer.state_dict()
-                        }, model_path+f"_resnet_{args.loss}_worst.pt")
+                        }, model_path+f"_{args.benchmark}_resnet_{args.loss}_worst.pt")
                     
             pbar.set_description(f'tr_loss: {loss:.4f} | tr_sbp_mae: {overall_mae_sbp:.4f} | tr_dbp_mae: {overall_mae_dbp:.4f} | val_sbp_mae: {val_loss_sbp:.4f} | val_dbp_mae: {val_loss_dbp:.4f} | t: {t_mean:.1f}')
             pbar.update(1)
     torch.save({
         'model_state_dict': regressor.state_dict(),
         'optimizer_state_dict': optimizer.state_dict()
-    }, model_path+"_last_resnet_gal.pt")
+    }, model_path+f"_{args.benchmark}_last_resnet_gal.pt")
     if not args.ignore_wandb:
         
         wandb.run.summary["best_train_loss"] = loss
