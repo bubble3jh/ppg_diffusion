@@ -24,8 +24,9 @@ def regressor_cond_fn(x, t, regressor, y, g, regressor_scale=1):
     assert y is not None
     with torch.enable_grad():
         x_in = x.detach().requires_grad_(True)
+        torch.nn.utils.clip_grad_norm_(x_in, 1.0)
         # predictions, _ = regressor(x_in, t, g)
-        predictions = regressor(x_in, t, g)
+        predictions = regressor(x_in, t, g)[0]
         mse = ((predictions - y) ** 2).mean()
         grad = torch.autograd.grad(mse, x_in)[0] * regressor_scale
         return grad

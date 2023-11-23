@@ -135,3 +135,5 @@ dmypy.json
 wandb/
 clf_model/
 reg_model/
+sampling_results/
+*.pkl

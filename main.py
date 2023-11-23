@@ -13,7 +13,7 @@ import paths
 
 def generate_diffusion_sequence(args, data, dataset, device, diffusion, regressor_cond_fn, regressor, sampling_dir, target_group):
     sample_batch_size = args.sample_batch_size if args.sample_batch_size is not None else get_sample_batch_size(data, target_group)
-    sample_batch_size = 2048 # TODO : 2048개씩 왕창 다만들기
+    sample_batch_size = 8192 # TODO : 2048개씩 왕창 다만들기
     if sample_batch_size == 0:
         os.makedirs(sampling_dir, exist_ok=True)
         with open(f'{sampling_dir}/skipped_{target_group}.pkl', 'wb') as f:
@@ -23,7 +23,7 @@ def generate_diffusion_sequence(args, data, dataset, device, diffusion, regresso
     num_loops = (sample_batch_size + micro_batch_size - 1) // micro_batch_size  
 
     sampled_seq_list = []; ori_y_list = []
-
+    
     for i in range(num_loops):
         current_batch_size = min(micro_batch_size, sample_batch_size - i * micro_batch_size)
         
@@ -45,6 +45,7 @@ def generate_diffusion_sequence(args, data, dataset, device, diffusion, regresso
         )
         ori_y_list.append(ori_y)
         sampled_seq_list.append(sampled_seq)
+    
     try:
         # torch.cat 호출 부분
         os.makedirs(sampling_dir, exist_ok=True)
@@ -55,6 +56,7 @@ def generate_diffusion_sequence(args, data, dataset, device, diffusion, regresso
             'y': torch.cat(ori_y_list, dim=0)
         }
         print(f"Sampling completed for target group {target_group}\nat {sampling_dir}")
+        
         with open(f'{sampling_dir}/sample_{args.reg_train_loss}_{target_group}.pkl', 'wb') as f:
             pickle.dump(result, f)
             
@@ -87,7 +89,7 @@ def main(args):
     sampling_root = paths.SAMPLING_ROOT
     if not args.disable_guidance:
         train_setting = train_setting + "_guided"
-    sampling_name = train_setting + f'_train_lr_{args.train_lr}_reg_set_{args.reg_selection_dataset}_tr_{args.reg_train_loss}_sel_{args.reg_selection_loss}_gs_{args.regressor_scale}'
+    sampling_name = train_setting + f'_use_group_info_regressor_train_lr_{args.train_lr}_reg_set_{args.reg_selection_dataset}_tr_{args.reg_train_loss}_sel_{args.reg_selection_loss}_gs_{args.regressor_scale}'
     sampling_dir = os.path.join(sampling_root, sampling_name)
 
     #------------------------------------ Load Data --------------------------------------
@@ -140,16 +142,16 @@ def main(args):
     # resnet ------
     if not args.disable_guidance:
         model_path, args = get_reg_modelpath(args)
-        # model_path = '/mlainas/ETRI_2023/reg_model/fold_0/train-step_epoch_2000_diffuse_2000_wd_0.0001_eta_0_lr_0.0001_3_final_no_group_label_resnet_group_average_loss_erm.pt'
+        # model_path = f'/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/train-step_epoch_2000_diffuse_2000_wd_0.0001_eta_0.0_lr_0.0001_3_final_no_group_label_resnet_group_average_loss_erm.pt'
         # regressor = ResNet1D(output_size=2, final_layers=args.final_layers).to(device)
         regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=8, 
-                            concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers, disable_g=False).to(device)
+                             disable_g=True, is_se=args.is_se, auxilary_classification=args.auxilary_classification,
+                             do_rate=args.do_rate).to(device)
         # regressor = ResNet1D(output_size=2, disable_g=True).to(device) #  disable_g=True
         model_state_dict = torch.load(model_path)['model_state_dict']
         regressor.load_state_dict(model_state_dict)
         regressor.eval()
         print("regressor model load complete")
-
     #------------------------------------- Training --------------------------------------
     
     trainer = Trainer1D(

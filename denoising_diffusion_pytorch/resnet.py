@@ -67,7 +67,7 @@ class BasicBlock(nn.Module):
     ResNet Basic Block
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride, groups, downsample, 
-                 use_bn, use_do, is_first_block=False, is_se=False, se_ch_low=4):
+                 use_bn, use_do, is_first_block=False, is_se=False, se_ch_low=4, do_rate=0.5):
         super(BasicBlock, self).__init__()
         
         self.in_channels = in_channels
@@ -88,7 +88,7 @@ class BasicBlock(nn.Module):
         # the first conv
         self.bn1 = nn.BatchNorm1d(in_channels)
         self.relu1 = nn.ReLU()
-        self.do1 = nn.Dropout(p=0.5)
+        self.do1 = nn.Dropout(p=do_rate)
         self.conv1 = MyConv1dPadSame(
             in_channels=in_channels, 
             out_channels=out_channels, 
@@ -99,7 +99,7 @@ class BasicBlock(nn.Module):
         # the second conv
         self.bn2 = nn.BatchNorm1d(out_channels)
         self.relu2 = nn.ReLU()
-        self.do2 = nn.Dropout(p=0.5)
+        self.do2 = nn.Dropout(p=do_rate)
         self.conv2 = MyConv1dPadSame(
             in_channels=out_channels, 
             out_channels=out_channels, 

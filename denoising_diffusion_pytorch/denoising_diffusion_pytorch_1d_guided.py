@@ -799,7 +799,6 @@ class GaussianDiffusion1D(nn.Module):
             target = v
         else:
             raise ValueError(f'unknown objective {self.objective}')
-
         loss = F.mse_loss(model_out, target, reduction = 'none')
         loss = reduce(loss, 'b ... -> b (...)', 'mean')
 

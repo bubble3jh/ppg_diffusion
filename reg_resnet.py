@@ -28,9 +28,10 @@ def main(args):
     batch_size = args.train_batch_size
     diffuse_time_step = args.diffusion_time_steps 
     epochs=args.train_epochs
+    time_layer = 'Linear' if args.time_linear  else 'MLP'
     if not args.ignore_wandb:
         wandb.init(entity="ppg-diffusion" ,project="ppg_regressor", config=args, group=args.run_group)
-        wandb.run.name=f"fold_{args.train_fold}_{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_nblock_{args.n_block}_{args.final_layers}-layer-clf"
+        wandb.run.name=f"fold_{args.train_fold}_{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_nblock_{args.n_block}_{args.final_layers}-layer-clf_timelayer_{time_layer}-auxilary_classifcation_{args.auxilary_classification}"
     data = get_data(sampling_method='first_k',
                                     num_samples=5,
                                     data_root=paths.DATA_ROOT,
@@ -40,10 +41,11 @@ def main(args):
     schedule_sampler = create_named_schedule_sampler(
         args.t_scheduling, diffuse_time_step=diffuse_time_step,total_epochs=epochs, init_bias=args.init_bias, final_bias=args.final_bias
     ) 
+    
     if args.disable_g :
-        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_no_group_label"
+        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_do_rate_{args.do_rate}_loss_{args.loss}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_no_group_label_timelayer_{time_layer}_is_se_{args.is_se}_auxilary_classifcation_{args.auxilary_classification}"
     else:
-        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_cat_{args.concat_label_mlp}"
+        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_cat_{args.concat_label_mlp}_timelayer_{time_layer}_auxilary_classifcation_{args.auxilary_classification}"
 
     tr_dataset = Dataset1D(data['train']['ppg'], label=data['train']['spdp'], groups=data['train']['group_label'] ,normalize=True)
     val_dataset = Dataset1D(data['valid']['ppg'], label=data['valid']['spdp'], groups=data['valid']['group_label'] ,normalize=True)
@@ -57,10 +59,11 @@ def main(args):
     #         dim_mults = (1, 2, 4, 8),
     #         channels = 1
     #     ).to(device)
-    regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=args.n_block, use_bn=False,
-                         concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers, disable_g=args.disable_g).to(device)
+    regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=args.n_block, is_se=args.is_se, use_bn=True, use_do=True,
+                         concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers, disable_g=args.disable_g, 
+                         time_linear=args.time_linear, auxilary_classification=args.auxilary_classification, do_rate=args.do_rate).to(device)
     print(regressor)
-    optimizer = optim.Adam(regressor.parameters(), lr=args.init_lr, weight_decay=args.weight_decay)
+    optimizer = optim.AdamW(regressor.parameters(), lr=args.init_lr, weight_decay=args.weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.T_max, eta_min=args.eta_min)
 
     # 전체 validation set 크기만큼 val_t_all을 미리 샘플링
@@ -101,6 +104,7 @@ def main(args):
     best_worst_val_loss_sbp = float('inf')
     best_worst_val_loss_dbp = float('inf')
     
+    cls_criterion = nn.CrossEntropyLoss()
     with tqdm(initial = 0, total = epochs) as pbar:
         for i in range(epochs):
             mae_sbp_lists={}; mae_dbp_lists={}; overall_mae_sbp_list=[]; overall_mae_dbp_list=[]
@@ -110,9 +114,16 @@ def main(args):
             t, _ = schedule_sampler.sample(batch.size(0), device)
             batch = diffusion.q_sample(batch, t)
             optimizer.zero_grad()
-            out = regressor(batch, t, g)
-            # for normal loss
-            loss = F.mse_loss(out, spdp, reduction="none")
+            
+            if args.auxilary_classification:
+                out, sbp_prob, dbp_prob = regressor(batch, t, g) # cls_result.shape = batch_size * 2 * 10
+                loss = F.mse_loss(out, spdp, reduction="none")
+                sbp_cls_loss = cls_criterion(sbp_prob, g.long()[:, 0])
+                dbp_cls_loss = cls_criterion(dbp_prob, g.long()[:, 1])
+            else:
+                out = regressor(batch, t, g)
+                # for normal loss
+                loss = F.mse_loss(out, spdp, reduction="none")
             # for group loss
             group = same_to_group(g)
             group_losses={}
@@ -141,8 +152,12 @@ def main(args):
             if not args.ignore_wandb :
                 wandb.log({"train_loss": loss.item(), "t_mean": t_mean})
             if args.loss == "ERM":
+                if args.auxilary_classification:
+                    loss = loss + sbp_cls_loss + dbp_cls_loss
                 loss.backward()
             elif args.loss == "group_average_loss":
+                if args.auxilary_classification:
+                    group_avg_loss = group_avg_loss + sbp_cls_loss + dbp_cls_loss
                 group_avg_loss.backward()
             optimizer.step()
             scheduler.step()
@@ -167,8 +182,10 @@ def main(args):
                    
                         val_t = val_t_all[start_idx:start_idx + val_batch.size(0)].to(device)
                         val_batch = diffusion.q_sample(val_batch, val_t)
-
-                        val_out = regressor(val_batch, val_t, val_g)
+                        if args.auxilary_classification:
+                            val_out, _, _ = regressor(val_batch, val_t, val_g)
+                        else:
+                            val_out = regressor(val_batch, val_t, val_g)
                         # val_out = regressor(val_batch, val_t, val_g)
 
                         val_overall_mae_sbp_list , val_overall_mae_dbp_list , val_mae_sbp_lists , val_mae_dbp_lists  = calculate_batch_mae(val_out, val_spdp, val_dataset, val_g, val_mae_sbp_lists, val_mae_dbp_lists, val_overall_mae_sbp_list, val_overall_mae_dbp_list)
@@ -200,6 +217,7 @@ def main(args):
                                 wandb.run.summary[f"val_erm_best_group_{group}_mae_sbp"] = val_sbp_group_losses[group]
                                 wandb.run.summary[f"val_erm_best_group_{group}_mae_dbp"] = val_dbp_group_losses[group]
                                 wandb.run.summary[f"val_erm_best_group_{group}_mae_tot"] = val_sbp_group_losses[group] + val_dbp_group_losses[group]
+                                wandb.run.summary["best_val_epoch"] = i
                         best_val_train_loss = loss
                         torch.save({
                             'model_state_dict': regressor.state_dict(),
@@ -243,6 +261,7 @@ def main(args):
         'optimizer_state_dict': optimizer.state_dict()
     }, model_path+"_last_resnet_gal.pt")
     if not args.ignore_wandb:
+        
         wandb.run.summary["best_train_loss"] = loss
         wandb.run.summary["best_val_train_loss"] = best_val_train_loss
         wandb.run.summary["best_val_loss_sbp"] = best_val_loss_sbp
@@ -283,7 +302,14 @@ if __name__ == '__main__':
     parser.add_argument("--g_mlp_layers", type=int, default=3)
     parser.add_argument("--n_block", type=int, default=8)
     parser.add_argument("--g_pos", type=str, default='rear',  choices=["rear", "front"])
-    
+    parser.add_argument("--time_linear", action='store_true',
+        help = "use linear layer instead MLP for time embedding (Default : False)")
+    parser.add_argument("--auxilary_classification", action='store_true',
+        help = "using classification as auxilary task (Default : False)")
+    parser.add_argument("--is_se", action='store_true',
+        help = "using se architecture (Default : False)")
+    parser.add_argument("--do_rate", type=float, default=0.5)
+
     ## Training ------------------------------------------------
     parser.add_argument("--diffusion_time_steps", type=int, default=2000)
     parser.add_argument("--train_epochs", type=int, default=2000)

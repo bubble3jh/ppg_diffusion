@@ -197,7 +197,7 @@ class ResNet1D(nn.Module):
     """
     def __init__(self, in_channels=1, base_filters=32, first_kernel_size=5, kernel_size=3, stride=4, 
                         groups=2, n_block=8, output_size=2 , is_se=False, se_ch_low=4, downsample_gap=2, 
-                        increasefilter_gap=2, use_bn=True, use_do=True, self_condition=False, final_layers=3, disable_g=True, concat_label_mlp=False, g_pos="rear", g_mlp_layers=3):
+                        increasefilter_gap=2, use_bn=True, use_do=True, self_condition=False, final_layers=3, disable_g=True, concat_label_mlp=False, g_pos="rear", g_mlp_layers=3, time_linear=False, auxilary_classification=False, do_rate=0.5):
         super(ResNet1D, self).__init__()
         
         self.n_block = n_block
@@ -214,10 +214,11 @@ class ResNet1D(nn.Module):
         self.concat_label_mlp = concat_label_mlp
         self.g_pos = g_pos
         self.disable_g = disable_g
+        self.do_rate = do_rate
         
         self.downsample_gap = downsample_gap # 2 for base model
         self.increasefilter_gap = increasefilter_gap # 4 for base model
-
+        self.auxilary_classification = auxilary_classification
         # first block
         self.first_block_conv = MyConv1dPadSame(in_channels=in_channels, out_channels=base_filters, kernel_size=self.first_kernel_size, stride=1)
         self.first_block_bn = nn.BatchNorm1d(base_filters)
@@ -261,7 +262,8 @@ class ResNet1D(nn.Module):
                 use_do = self.use_do, 
                 is_first_block=is_first_block,
                 is_se=self.is_se,
-                se_ch_low=self.se_ch_low)
+                se_ch_low=self.se_ch_low,
+                do_rate=self.do_rate)
             self.basicblock_list.append(tmp_block)
 
         # final prediction
@@ -271,13 +273,21 @@ class ResNet1D(nn.Module):
         # condtional layer
         fourier_dim = 256; time_dim = 625
         sinu_pos_emb = SinusoidalPosEmb(fourier_dim)
-        self.time_mlp = nn.Sequential(
-            sinu_pos_emb,
-            nn.Linear(fourier_dim, time_dim), # fourier_dim - 1 ?
-            nn.GELU(),
-            nn.Linear(time_dim, time_dim),
-            Lambda(lambda x: x.unsqueeze(1)) # Add a dimension at position 1
-        )
+        if time_linear:
+            self.time_layer = nn.Sequential(
+                sinu_pos_emb, 
+                nn.Linear(fourier_dim, time_dim),
+                nn.ReLU(), 
+                Lambda(lambda x: x.unsqueeze(1)) # Add a dimension at position 1
+            )
+        else:
+            self.time_layer = nn.Sequential(
+                sinu_pos_emb,
+                nn.Linear(fourier_dim, time_dim), # fourier_dim - 1 ?
+                nn.GELU(),
+                nn.Linear(time_dim, time_dim),
+                Lambda(lambda x: x.unsqueeze(1)) # Add a dimension at position 1
+            )
         if not disable_g:
             # num_groups=6
             # self.group_emb = nn.Embedding(num_groups, time_dim)
@@ -294,6 +304,9 @@ class ResNet1D(nn.Module):
         # Classifier
         # self.main_clf = nn.Linear(out_channels, output_size)
         self.main_clf = MLP(input_dim = out_channels, hidden_dim = out_channels, output_dim = output_size, num_layers = final_layers)
+        self.sbp_cls_layer =  MLP(input_dim = out_channels, hidden_dim = out_channels, output_dim = 10, num_layers = final_layers)
+        self.dbp_cls_layer =  MLP(input_dim = out_channels, hidden_dim = out_channels, output_dim = 10, num_layers = final_layers)
+        self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x, t=None, g=None):
         # x = x['ppg']
@@ -301,7 +314,7 @@ class ResNet1D(nn.Module):
         assert t != None
         assert x.shape[0] == t.shape[0]
 
-        t = self.time_mlp(t)
+        t = self.time_layer(t)
         assert x.shape == t.shape
         # Condition with label g and t
         if not self.disable_g:
@@ -342,7 +355,15 @@ class ResNet1D(nn.Module):
                     h = h + self.spdp_encoder(g.type(torch.float32))
 
         # ===== Concat x_demo
-        out = self.main_clf(h)
+        if self.auxilary_classification:
+            regressor_output = self.main_clf(h)
+            sbp_cls_output = self.sbp_cls_layer(h)
+            dbp_cls_output = self.dbp_cls_layer(h)
+            sbp_prob = self.softmax(sbp_cls_output)
+            dbp_prob = self.softmax(dbp_cls_output)
+            out = regressor_output, sbp_prob, dbp_prob
+        else:
+            out = self.main_clf(h)
         return out
 
 def init_weights(m):
