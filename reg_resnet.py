@@ -30,7 +30,9 @@ def main(args):
     epochs=args.train_epochs
     time_layer = 'Linear' if args.time_linear  else 'MLP'
     if not args.ignore_wandb:
-        wandb.init(entity="ppg-diffusion" ,project="ppg_regressor", config=args, group=args.run_group)
+        run_group = args.benchmark + args.run_group
+        # import pdb; pdb.set_trace()
+        wandb.init(entity="ppg-diffusion" ,project="ppg_regressor", config=args, group=run_group)
         wandb.run.name=f"fold_{args.train_fold}_{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_nblock_{args.n_block}_{args.final_layers}-layer-clf_timelayer_{time_layer}-auxilary_classifcation_{args.auxilary_classification}"
     data = get_data(sampling_method='first_k',
                                     num_samples=5,
@@ -222,10 +224,10 @@ def main(args):
                                 wandb.run.summary[f"val_erm_best_group_{group}_mae_tot"] = val_sbp_group_losses[group] + val_dbp_group_losses[group]
                                 wandb.run.summary["best_val_epoch"] = i
                         best_val_train_loss = loss
-                        torch.save({
-                            'model_state_dict': regressor.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict()
-                        }, model_path+f"_{args.benchmark}_resnet_{args.loss}_erm.pt")
+                        # torch.save({
+                        #     'model_state_dict': regressor.state_dict(),
+                        #     'optimizer_state_dict': optimizer.state_dict()
+                        # }, model_path+f"_{args.benchmark}_resnet_{args.loss}_erm.pt")
                         
                     if gal_val_loss_sbp+gal_val_loss_dbp < best_gal_val_loss_sbp+best_gal_val_loss_dbp:
                         print(f"best gal val loss updated: sbp {gal_val_loss_sbp:.4f} dbp {gal_val_loss_dbp:.4f}")
@@ -237,10 +239,10 @@ def main(args):
                                 wandb.run.summary[f"val_gal_best_group_{group}_mae_sbp"] = val_sbp_group_losses[group]
                                 wandb.run.summary[f"val_gal_best_group_{group}_mae_dbp"] = val_dbp_group_losses[group]
                                 wandb.run.summary[f"val_gal_best_group_{group}_mae_tot"] = val_sbp_group_losses[group] + val_dbp_group_losses[group]
-                        torch.save({
-                            'model_state_dict': regressor.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict()
-                        }, model_path+f"_{args.benchmark}_resnet_{args.loss}_gal.pt")
+                        # torch.save({
+                        #     'model_state_dict': regressor.state_dict(),
+                        #     'optimizer_state_dict': optimizer.state_dict()
+                        # }, model_path+f"_{args.benchmark}_resnet_{args.loss}_gal.pt")
                         
                     if worst_val_loss_sbp + worst_val_loss_dbp < best_worst_val_loss_sbp + best_worst_val_loss_dbp:
                         print(f"best worst val loss updated: sbp {worst_val_loss_sbp:.4f} dbp {worst_val_loss_dbp:.4f}")
@@ -252,17 +254,17 @@ def main(args):
                                 wandb.run.summary[f"val_worst_best_group_{group}_mae_sbp"] = val_sbp_group_losses[group]
                                 wandb.run.summary[f"val_worst_best_group_{group}_mae_dbp"] = val_dbp_group_losses[group]
                                 wandb.run.summary[f"val_worst_best_group_{group}_mae_tot"] = val_sbp_group_losses[group] + val_dbp_group_losses[group]
-                        torch.save({
-                            'model_state_dict': regressor.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict()
-                        }, model_path+f"_{args.benchmark}_resnet_{args.loss}_worst.pt")
+                        # torch.save({
+                        #     'model_state_dict': regressor.state_dict(),
+                        #     'optimizer_state_dict': optimizer.state_dict()
+                        # }, model_path+f"_{args.benchmark}_resnet_{args.loss}_worst.pt")
                     
             pbar.set_description(f'tr_loss: {loss:.4f} | tr_sbp_mae: {overall_mae_sbp:.4f} | tr_dbp_mae: {overall_mae_dbp:.4f} | val_sbp_mae: {val_loss_sbp:.4f} | val_dbp_mae: {val_loss_dbp:.4f} | t: {t_mean:.1f}')
             pbar.update(1)
-    torch.save({
-        'model_state_dict': regressor.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict()
-    }, model_path+f"_{args.benchmark}_last_resnet_gal.pt")
+    # torch.save({
+    #     'model_state_dict': regressor.state_dict(),
+    #     'optimizer_state_dict': optimizer.state_dict()
+    # }, model_path+f"_{args.benchmark}_last_resnet_gal.pt")
     if not args.ignore_wandb:
         
         wandb.run.summary["best_train_loss"] = loss

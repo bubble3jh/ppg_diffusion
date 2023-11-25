@@ -1,9 +1,8 @@
 #!/bin/bash
 GPU_IDS=(1 2 5 6 7)  # 사용할 GPU ID 리스트
 IDX=0
-benchmark="ppgbp"
-run_group="ppgbp_w/o_group_label_adamw"
-for benchmark in "ppgbp" "sensors"
+run_group="_w/o_group_label_adamw"
+for benchmark in "sensors"
 do
 for train_fold in 0 1 2 3 4
 do
@@ -45,9 +44,8 @@ CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} /mlainas/teang1995/anaconda3/envs/PPG/bin/
 --final_layers ${final_layers} \
 --t_scheduling ${t_scheduling} \
 --benchmark ${benchmark} \
---ignore_wandb \
 ${is_se} \
-${auxilary_classification}  # 백그라운드에서 실행
+${auxilary_classification} & # 백그라운드에서 실행
 
 # GPU ID를 다음 것으로 변경
 IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))
