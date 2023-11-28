@@ -331,12 +331,13 @@ class Unet1D(nn.Module):
         learned_variance = False,
         learned_sinusoidal_cond = False,
         random_fourier_features = False,
-        learned_sinusoidal_dim = 16
+        learned_sinusoidal_dim = 16,
+        seq_length = 625
     ):
         super().__init__()
 
         # determine dimensions
-
+        self.is_ppgbp = seq_length % 2 == 0
         self.channels = channels
         self.self_condition = self_condition
         input_channels = channels * (2 if self_condition else 1)
@@ -444,9 +445,12 @@ class Unet1D(nn.Module):
         for idx, (block1, block2, attn, upsample) in enumerate(self.ups):
 
             # Check if it's the last upsample step
-            if idx == len(self.ups) - 1:
-                x = expand_last_dimension(x)
-            
+            if self.is_ppgbp:
+                if idx == 1 or idx == 2:
+                    x = expand_last_dimension(x)
+            else:
+                if idx == len(self.ups) - 1:
+                    x = expand_last_dimension(x)
             x = torch.cat((x, h.pop()), dim = 1)
             x = block1(x, t)
 

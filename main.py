@@ -13,7 +13,7 @@ import paths
 
 def generate_diffusion_sequence(args, data, dataset, device, diffusion, regressor_cond_fn, regressor, sampling_dir, target_group):
     sample_batch_size = args.sample_batch_size if args.sample_batch_size is not None else get_sample_batch_size(data, target_group)
-    sample_batch_size = 8192 # TODO : 2048개씩 왕창 다만들기
+    sample_batch_size = args.gen_size
     if sample_batch_size == 0:
         os.makedirs(sampling_dir, exist_ok=True)
         with open(f'{sampling_dir}/skipped_{target_group}.pkl', 'wb') as f:
@@ -93,7 +93,10 @@ def main(args):
     sampling_dir = os.path.join(sampling_root, sampling_name)
 
     #------------------------------------ Load Data --------------------------------------
-
+    if args.benchmark == "ppgbp":
+        args.seq_length=262
+    else:
+        args.seq_length=625
     data_sampling_start = time.time()
     # ppg, label = get_data(sampling_method=args.sampling_method,
     #                              num_samples=args.num_samples,
@@ -123,7 +126,8 @@ def main(args):
     model = Unet1D(
         dim = 64,
         dim_mults = (1, 2, 4, 8),
-        channels = args.channels
+        channels = args.channels,
+        seq_length = args.seq_length
     )
 
     diffusion = GaussianDiffusion1D(
@@ -142,7 +146,7 @@ def main(args):
         # regressor = ResNet1D(output_size=2, final_layers=args.final_layers).to(device)
         regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=8, 
                              disable_g=True, is_se=args.is_se, auxilary_classification=args.auxilary_classification,
-                             do_rate=args.do_rate).to(device)
+                             do_rate=args.do_rate, seq_length=args.seq_length).to(device)
         # regressor = ResNet1D(output_size=2, disable_g=True).to(device) #  disable_g=True
         model_state_dict = torch.load(model_path)['model_state_dict']
         regressor.load_state_dict(model_state_dict)
@@ -162,7 +166,7 @@ def main(args):
         results_folder = result_path
     )
     
-    if not args.sample_only:
+    if not args.sample_only and not os.path.exists(f'/mlainas/ETRI_2023/weights/fold_{args.train_fold}/seed_1000_sampling_method_first_k_num_samples_5-diffusion_time_steps_2000-train_num_steps_32_sensors/model-last.pt'):
         trainer.train()
         trainer.save('last')
     else:
@@ -237,6 +241,7 @@ if __name__ == '__main__':
     parser.add_argument("--t_scheduling", type=str, default="uniform",  choices=["loss-second-moment", "uniform", "train-step"])
     parser.add_argument("--regressor_scale", type=float, default=1.0)
     parser.add_argument("--regressor_epoch", type=int, default=2000)
+    parser.add_argument("--gen_size", type=int, default=8096)
     args = parser.parse_args()
 
     main(args)

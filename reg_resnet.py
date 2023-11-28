@@ -239,10 +239,10 @@ def main(args):
                                 wandb.run.summary[f"val_gal_best_group_{group}_mae_sbp"] = val_sbp_group_losses[group]
                                 wandb.run.summary[f"val_gal_best_group_{group}_mae_dbp"] = val_dbp_group_losses[group]
                                 wandb.run.summary[f"val_gal_best_group_{group}_mae_tot"] = val_sbp_group_losses[group] + val_dbp_group_losses[group]
-                        # torch.save({
-                        #     'model_state_dict': regressor.state_dict(),
-                        #     'optimizer_state_dict': optimizer.state_dict()
-                        # }, model_path+f"_{args.benchmark}_resnet_{args.loss}_gal.pt")
+                        torch.save({
+                            'model_state_dict': regressor.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict()
+                        }, model_path+f"_{args.benchmark}_resnet_{args.loss}_gal.pt")
                         
                     if worst_val_loss_sbp + worst_val_loss_dbp < best_worst_val_loss_sbp + best_worst_val_loss_dbp:
                         print(f"best worst val loss updated: sbp {worst_val_loss_sbp:.4f} dbp {worst_val_loss_dbp:.4f}")
