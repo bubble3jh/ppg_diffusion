@@ -59,61 +59,54 @@ Also, for hyperparameter sweeping, we used files located in ```./sh ```.
 
 ## Implementation
 
-We used the following Python packages for core development. We tested on `Python 3.10.10`.
+We used the following Python packages for core development. We tested on `Python 3.11.4`.
 ```
-pytorch                   2.0.0
-pandas                    2.0.0
-numpy                     1.23.5
-scikit-learn              1.2.2
-scipy                     1.10.1
+pytorch                   1.9.0
+pandas                    1.3.3
+numpy                     1.22.4
+scikit-learn              0.24.2
+scipy                     1.7.1
 ```
 
 ### Arg Parser
 
-The script `main.py` allows to train and evaluate all the baselines we consider.
+#### Command Line Arguments for Main.py
 
-To train proposed methods use this:
-```
-main.py --epochs=<EPOCHS>                      \
-        --model=<MODEL>                        \
-        --num_features=<NUM_FEATURES>          \
-        --hidden_dim=<HIDEN_DIM>               \
-        --num_layers=<NUM_LAYERS>              \
-        --num_heads=<NUM_HEADS>                \
-        [--disable_embedding]                  \
-        --wd=<WD>                              \
-        --lr_init=<LR_INIT>                    \
-        --drop_out=<DROP_OUT>                  \
-        --lamb=<LAMB>                          \
-        --scheduler=<SCHEDULAR>                \
-        --t_max=<T_MAX>                        \
-        [--ignore_wandb]
-```
-Parameters:
-* ```EPOCHS``` &mdash; number of training epochs (default: 300)
-* ```MODEL``` &mdash; model name (default: transformer) :
-    - transformer
-    - linear
-    - ridge
-    - mlp
-    - svr
-    - rfr
-* ```NUM_FEATURES``` &mdash; feature size (default : 128)
-* ```HIDEN_DIM``` &mdash; DL model hidden size (default : 64)
-* ```NUM_LAYERS``` &mdash; DL model layer num (default : 3)
-* ```NUM_HEADS``` &mdash; Transformer model head num (default : 2)
-* ```--disable_embedding``` &mdash; Disable embedding to use raw data 
-* ```WD``` &mdash; weight decay (default: 5e-4)
-* ```LR_INIT``` &mdash; initial learning rate (default: 0.005)
-* ```DROP_OUT``` &mdash; dropout rate (default: 0.0)
-* ```LAMB``` &mdash; Penalty term for Ridge Regression (Default : 0)
-* ```scheduler``` &mdash; schedular (default: constant) :
-    - constant
-    - cos_anneal
-* ```t_max``` &mdash; T_max for Cosine Annealing Learning Rate Scheduler (Default : 300)
-* ```--ignore_wandb``` &mdash; Ignore WandB to do not save results
+This script is used for generating PPG (Photoplethysmography) data with regressor guidance. Below are the command line arguments you can use to configure and run the script.
 
-----
+##### Data Arguments
+
+- `--seq_length`: Sequence length. Default is `625` (625 for BCG and sensors, 262 for PPG-BP).
+- `--train_batch_size`: Training batch size. Default is `32`.
+- `--min_max`: If set to `False`, disables Min-Max normalization of data. Default is `True`.
+- `--benchmark`: Specifies the benchmark dataset. Default is `'bcg'`.
+- `--train_fold`: Specifies the train fold. for cross validation setting of BP benchmark.
+- `--channels`: Number of channels. Default is `1`.
+
+##### Model Arguments
+
+- `--disable_guidance`: If set, disables the use of guidance. Default is `False`.
+- `--reg_train_loss`: Specifies the regression training loss. Default is `'group_average_loss'`.
+- `--reg_selection_dataset`: Dataset for regression selection. Default is `'val'`.
+- `--reg_selection_loss`: Loss function for regression selection. Choices are `["erm", "gal", "worst"]`. Default is `'gal'`.
+
+##### Training Arguments
+
+- `--diffusion_time_steps`: Number of diffusion time steps. Default is `2000`.
+- `--train_num_steps`: Number of training steps. Default is `32`.
+- `--train_lr`: Learning rate for training. Default is `8e-5`.
+- `--optim`: Optimization algorithm. Default is `'adam'`.
+- `--dropout`: Dropout rate. Default is `0`.
+
+##### Sampling Arguments
+
+- `--sample_only`: If set, stops training and enables only sampling. Default is `False`.
+- `--sample_batch_size`: Batch size for sampling. Default is `None`.
+- `--target_group`: Target group for sampling. Choices are `[-1, 0, 1, 2, 3, 4]`, where `-1` is all, `0` is hyp0, `1` is normal, `2` is perhyper, `3` is hyper2, `4` is crisis. Default is `-1` (all).
+- `--t_scheduling`: Scheduling type for `t`. Choices are `["loss-second-moment", "uniform", "train-step"]`. Default is `"uniform"`.
+- `--regressor_scale`: Scale of the regressor. Default is `1.0`.
+- `--regressor_epoch`: Number of epochs for the regressor. Default is `2000`.
+- `--gen_size`: Size for generation. Default is `8096`.
 
 ### Train Models
 
