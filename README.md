@@ -70,9 +70,9 @@ scipy                     1.7.1
 
 ### Arg Parser
 
-#### Command Line Arguments for Main.py
+#### Command Line Arguments for main.py
 
-This script is used for generating PPG (Photoplethysmography) data with regressor guidance. Below are the command line arguments you can use to configure and run the script.
+This script is used for generating PPG (Photoplethysmography) data with regressor guidance.
 
 ##### Data Arguments
 
@@ -108,49 +108,50 @@ This script is used for generating PPG (Photoplethysmography) data with regresso
 - `--regressor_epoch`: Number of epochs for the regressor. Default is `2000`.
 - `--gen_size`: Size for generation. Default is `8096`.
 
-### Train Models
+#### Command Line Arguments for reg_res.py
 
-To train model for example, use this:
+This script is used for training a guidance regressor for do regression task of noisy PPG data. 
+
+##### Data Arguments
+
+- `--seq_length`: Sequence length. Default is `625`.
+- `--train_batch_size`: Training batch size. Default is `32`.
+- `--min_max`: If set to `False`, disables Min-Max normalization of data. Default is `True`.
+- `--benchmark`: Specifies the benchmark dataset. Default is `'bcg'`.
+- `--train_fold`: Specifies the training fold. Default is `0`.
+
+##### Model Arguments
+
+- `--final_layers`: Number of final layers in the model. Default is `3`.
+- `--time_linear`: If set, uses a linear layer instead of MLP for time embedding. Default is `False`.
+- `--auxilary_classification`: If set, adds classification as an auxiliary task. Default is `False`.
+- `--is_se`: If set, uses SE architecture. Default is `False`.
+- `--do_rate`: Dropout rate. Default is `0.5`.
+
+##### Training Arguments
+
+- `--diffusion_time_steps`: Number of diffusion time steps. Default is `2000`.
+- `--train_epochs`: Number of training epochs. Default is `2000`.
+- `--init_lr`: Initial learning rate. Default is `0.0001`.
+- `--weight_decay`: Weight decay factor. Default is `1e-4`.
+- `--init_bias`: Initial bias. Default is `0.2`.
+- `--final_bias`: Final bias. Default is `1`.
+- `--loss`: Loss function. Choices are `["ERM", "group_average_loss"]`. Default is `'group_average_loss'`.
+- `--t_scheduling`: Scheduling type for `t`. Choices are `["loss-second-moment", "uniform", "train-step"]`. Default is `"train-step"`.
+- `--T_max`: Maximum value for `T`. Default is `2000`.
+- `--eta_min`: Minimum eta value. Default is `0`.
+
+
+### Usage Examples
+
+The simplest way to use our model is as follows:
 
 ```
-# linear
-python3 main.py --model=linear --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=200 --scheduler=cos_anneal --t_max=200 
+# Train Regressor
+python reg_resnet.py --lr_init=1e-4 --wd=1e-3 --t_scheduling "train-step" --loss "group_average_loss" --train_fold 0 --auxiliary
 
-# mlp
-python3 main.py --model=mlp --hidden_dim=128 --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=200 --scheduler=cos_anneal --t_max=200 --drop_out=0.1 --num_layers=3
+# Train and sample PPG signal with diffusion model
+python main.py --reg_train_loss "group_average_loss" --train_num_steps 32 --train_lr 8e-05 --train_fold 0 --reg_selection_loss "gal"
 
-# transformer
-python3 main.py --model=transformer --hidden_dim=128 --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=200 --scheduler=cos_anneal --t_max=200 --drop_out=0.1 --num_layers=2 --num_heads=2
-
-```
-
-If you want to sweep model to search best hyperparameter, you can use this:
-
-```
-# linear
-bash sh/linear.sh
-
-# mlp
-bash sh/mlp.sh 
-
-# transformer
-bash sh/transformer.sh
-
-```
-
-It should be modified for appropriate parameters for personal sweeping
-
-### Evaluate Models
-
-To test model, use this:
-```
-# linear
-python3 main.py --model=linear --hidden_dim=128 --eval_model=<MODEL_PATH>
-
-# mlp
-python3 main.py --model=mlp --hidden_dim=128 --num_layers=3 --eval_model=<MODEL_PATH>
-
-# transformer
-python3 main.py --model=transformer --hidden_dim=128 --num_layers=2 --num_heads=2 --eval_model=<MODEL_PATH>
 ```
 
