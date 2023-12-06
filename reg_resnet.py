@@ -36,7 +36,7 @@ def main(args):
     # if not args.ignore_wandb:
     #     run_group = args.benchmark + args.run_group
     #     wandb.init(entity="ppg-diffusion" ,project="ppg_regressor", config=args, group=run_group)
-    #     wandb.run.name=f"fold_{args.train_fold}_{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_nblock_{args.n_block}_{args.final_layers}-layer-clf_timelayer_{time_layer}-auxilary_classifcation_{args.auxilary_classification}"
+    #     wandb.run.name=f"fold_{args.train_fold}_{args.t_scheduling}_epoch_{epochs}_diffuse_{diffuse_time_step}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_nblock_{args.n_block}_{args.final_layers}-layer-clf_timelayer_{time_layer}-auxilary_classifcation_{args.auxiliary}"
     
     # ------------------------------------ Load Data ------------------------------------
     data = get_data(sampling_method='first_k',
@@ -73,7 +73,7 @@ def main(args):
         seq_length=625
     regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=args.n_block, is_se=args.is_se, use_bn=True, use_do=True,
                          concat_label_mlp=args.concat_label_mlp, g_pos=args.g_pos, g_mlp_layers=args.g_mlp_layers, disable_g=args.disable_g, 
-                         time_linear=args.time_linear, auxilary_classification=args.auxilary_classification, do_rate=args.do_rate, seq_length=seq_length).to(device)
+                         time_linear=args.time_linear, auxilary_classification=args.auxiliary, do_rate=args.do_rate, seq_length=seq_length).to(device)
     
     # ------------------------------------ Optimizer and Train schedular ------------------------------------
     optimizer = optim.AdamW(regressor.parameters(), lr=args.init_lr, weight_decay=args.weight_decay)
@@ -131,7 +131,7 @@ def main(args):
             optimizer.zero_grad()
             
             # Range-aware loss
-            if args.auxilary_classification:
+            if args.auxiliary:
                 out, sbp_prob, dbp_prob = regressor(batch, t, g) 
                 loss = F.mse_loss(out, spdp, reduction="none")
                 sbp_cls_loss = cls_criterion(sbp_prob, g.long()[:, 0])
@@ -171,11 +171,11 @@ def main(args):
             if not args.ignore_wandb :
                 wandb.log({"train_loss": loss.item(), "t_mean": t_mean})
             if args.loss == "ERM":
-                if args.auxilary_classification:
+                if args.auxiliary:
                     loss = loss + sbp_cls_loss + dbp_cls_loss
                 loss.backward()
             elif args.loss == "group_average_loss": 
-                if args.auxilary_classification: # default setting, use group avg loss and auxiliary classification
+                if args.auxiliary: # default setting, use group avg loss and auxiliary classification
                     group_avg_loss = group_avg_loss + sbp_cls_loss + dbp_cls_loss
                 group_avg_loss.backward()
             optimizer.step()
@@ -194,7 +194,7 @@ def main(args):
                    
                         val_t = val_t_all[start_idx:start_idx + val_batch.size(0)].to(device)
                         val_batch = diffusion.q_sample(val_batch, val_t)
-                        if args.auxilary_classification:
+                        if args.auxiliary:
                             val_out, _, _ = regressor(val_batch, val_t, val_g)
                         else:
                             val_out = regressor(val_batch, val_t, val_g)
@@ -310,7 +310,7 @@ if __name__ == '__main__':
     parser.add_argument("--final_layers", type=int, default=3)
     parser.add_argument("--time_linear", action='store_true',
         help = "use linear layer instead MLP for time embedding (Default : False)")
-    parser.add_argument("--auxilary_classification", action='store_true',
+    parser.add_argument("--auxiliary", action='store_true',
         help = "using classification as auxilary task (Default : False)")
     parser.add_argument("--is_se", action='store_true',
         help = "using se architecture (Default : False)")
