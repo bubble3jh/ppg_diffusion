@@ -136,17 +136,6 @@ class Dataset1D(Dataset):
         self.label_min = self.label_min.to("cuda")
         return label * (self.label_max - self.label_min) + self.label_min
 
-# class Dataset1D(Dataset):
-#     def __init__(self, tensor: Tensor):
-#         super().__init__()
-#         self.tensor = tensor.clone()
-
-#     def __len__(self):
-#         return len(self.tensor)
-
-#     def __getitem__(self, idx):
-#         return self.tensor[idx].clone()
-
 # small helper modules
 
 class Residual(nn.Module):
@@ -431,16 +420,6 @@ class Unet1D(nn.Module):
         x = self.mid_block1(x, t)
         x = self.mid_attn(x)
         x = self.mid_block2(x, t)
-
-        # for block1, block2, attn, upsample in self.ups:
-        #     x = torch.cat((x, h.pop()), dim = 1)
-        #     x = block1(x, t)
-
-        #     x = torch.cat((x, h.pop()), dim = 1)
-        #     x = block2(x, t)
-        #     x = attn(x)
-
-        #     x = upsample(x)
 
         for idx, (block1, block2, attn, upsample) in enumerate(self.ups):
 
