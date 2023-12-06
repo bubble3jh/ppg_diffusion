@@ -15,7 +15,7 @@ def classifier_cond_fn(x, t, classifier, y, classifier_scale=1):
         grad = torch.autograd.grad(selected.sum(), x_in)[0] * classifier_scale
         return grad
     
-    # added
+# guide with regressor cond fn with gradient of guidance regressor
 def regressor_cond_fn(x, t, regressor, y, g, regressor_scale=1):
     """
     return the gradient of the MSE of the regressor output and y wrt x.
