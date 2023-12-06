@@ -21,7 +21,7 @@ do
           for regressor_scale in 1e+7 5e+7 1e+8 5e+8 1e+9
           do
           # 현재 GPU ID 선택
-          CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} /mlainas/teang1995/anaconda3/envs/PPG/bin/python main.py \
+          CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} python main.py \
           --reg_train_loss ${reg_train_loss} \
           --regressor_epoch ${regressor_epoch} \
           --diffusion_time_steps ${diffusion_time_steps} \

@@ -136,4 +136,5 @@ wandb/
 clf_model/
 reg_model/
 sampling_results/
+check_outs/
 *.pkl

@@ -29,7 +29,7 @@ do
 for is_se in "--is_se" ""
 do
 # 현재 GPU ID 선택
-CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} /mlainas/teang1995/anaconda3/envs/PPG/bin/python reg_resnet.py \
+CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} python reg_resnet.py \
 --run_group ${run_group} \
 --train_epochs ${train_epochs} \
 --diffusion_time_steps ${diffusion_time_steps} \
