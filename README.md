@@ -5,38 +5,55 @@ This repository contains PyTorch implemenations of Data Augmentation of PPG Sign
 <img src="./images/flowchart.png" width="500px"></img>
 
 ## Introduction
-This is a machine learning code that uses coronavirus cluster data to predict how many people each cluster will infect and how long the cluster will last. 
-For the layer that embeds each information, there are two layers: a layer that processes cluster information (e.g., severity index etc.) and a layer that processes patient information (e.g., age, address, etc.).
-For the Transformer model, we used a sequence of dates for each cluster and performed a regression using the correlation of each sequence.
+In this study, we tackle the challenge of data imbalance in medical datasets by generating high-quality, diverse Photoplethysmogram (PPG) signals using regressor-guided diffusion models. Our approach, a first in this field, effectively enhances Arterial Blood Pressure predictions from PPG data. We address signal noise issues through auxiliary class prediction and diffuse step scheduling, resulting in significant performance improvements in benchmark datasets.
 
 ### Project Tree
 ```
-├── data
-│   ├── data_cut_0.csv
-│   ├── data_cut_1.csv
-│   ├── data_cut_2.csv
-│   ├── data_cut_3.csv
-│   ├── data_cut_4.csv
-│   ├── data_cut_5.csv
-│   ├── data_final_mod.csv
-│   ├── data_mod.ipynb
-│   └── data_task.csv
-├── sh
-│   ├── linear_raw.sh
-│   ├── linear.sh
-│   ├── mlp_raw.sh
-│   ├── mlp.sh
-│   ├── ridge_raw.sh
-│   ├── ridge.sh
-│   └── transformer.sh
+.
+├── abp.py
+├── data.py
+├── denoising_diffusion_pytorch
+│   ├── attend.py
+│   ├── classifier_free_guidance.py
+│   ├── cond_fn.py
+│   ├── continuous_time_gaussian_diffusion.py
+│   ├── denoising_diffusion_pytorch_1d_guided.py
+│   ├── denoising_diffusion_pytorch_1d.py
+│   ├── denoising_diffusion_pytorch.py
+│   ├── elucidated_diffusion.py
+│   ├── fid_evaluation.py
+│   ├── guided_diffusion.py
+│   ├── __init__.py
+│   ├── learned_gaussian_diffusion.py
+│   ├── model.py
+│   ├── nn.py
+│   ├── ppg_model.py
+│   ├── resample.py
+│   ├── resnet.py
+│   ├── simple_diffusion.py
+│   ├── version.py
+│   ├── v_param_continuous_time_gaussian_diffusion.py
+│   └── weighted_objective_gaussian_diffusion.py
 ├── main.py
-├── ml_algorithm.py
 ├── models.py
-├── utils.py
-└── README.md
+├── paths.py
+├── README.md
+├── reg_resnet.py
+├── setup.py
+├── sh
+│   ├── sample_diffusion.sh
+│   ├── train_and_sample_diffusion_for_ppgbp.sh
+│   ├── train_and_sample_diffusion_for_sensors.sh
+│   └── train_reg_res.sh
+└── utils.py
 ```
 
-For our experiments, we divided the dataset according to how observable the dynamics were. For example, if we observed a cluster until day 2 and predicted the duration of the cluster and additional patients for the remaining days, we would have ``` ./data/data_cut_2.csv ```. This generated a dataset of 5 days, which we combined into ``` data_cut_0.csv ``` and used in the experiment. The data preprocessing method is documented in ```data_mod.ipynb```.
+Our repository involves a three-step process:
+1. **Training the guidance regressor**
+2. **Training the diffusion model**
+3. **Sampling target PPG signals** using the trained guidance regressor and diffusion model.
+
+For this, we utilize `reg_resnet.py` and `main.py`. `reg_resnet.py` is for executing the guidance regressor, and `main.py` manages both the training and sampling of the diffusion model. If the diffusion model has already been trained, you can use the `--sample_only` flag in `main.py` to skip the training phase and proceed directly to sampling.
 
 Also, for hyperparameter sweeping, we used files located in ```./sh ```.
 
