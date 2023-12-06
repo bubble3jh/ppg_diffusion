@@ -53,7 +53,7 @@ Our repository involves a three-step process:
 2. **Training the diffusion model**
 3. **Sampling target PPG signals** using the trained guidance regressor and diffusion model.
 
-For this, we utilize `reg_resnet.py` and `main.py`. `reg_resnet.py` is for executing the guidance regressor, and `main.py` manages both the training and sampling of the diffusion model. If the diffusion model has already been trained, you can use the `--sample_only` flag in `main.py` to skip the training phase and proceed directly to sampling.
+For this, we utilize `reg_resnet.py` and `main.py`. `reg_resnet.py` is for training the guidance regressor, and `main.py` manages both the training and sampling of the diffusion model. If the diffusion model has already been trained, you can use the `--sample_only` flag in `main.py` to skip the training phase and proceed directly to sampling.
 
 Also, for hyperparameter sweeping, we used files located in ```./sh ```.
 
