@@ -12,21 +12,21 @@ from utils import visualize, sample_sbp_dbp, get_data, get_sample_batch_size, ge
 import paths
 
 def generate_diffusion_sequence(args, data, dataset, device, diffusion, regressor_cond_fn, regressor, sampling_dir, target_group):
-    sample_batch_size = args.sample_batch_size if args.sample_batch_size is not None else get_sample_batch_size(data, target_group)
     sample_batch_size = args.gen_size
+    # skip sampling when sample size is zero
     if sample_batch_size == 0:
         os.makedirs(sampling_dir, exist_ok=True)
         with open(f'{sampling_dir}/skipped_{target_group}.pkl', 'wb') as f:
             pickle.dump([], f)  
         return
-    micro_batch_size = 2048  # TODO: 적절한 micro batch size 찾기 OOM 회피 위함.
+    micro_batch_size = 2048  # avoiding OOM
     num_loops = (sample_batch_size + micro_batch_size - 1) // micro_batch_size  
 
     sampled_seq_list = []; ori_y_list = []
     
     for i in range(num_loops):
         current_batch_size = min(micro_batch_size, sample_batch_size - i * micro_batch_size)
-        
+        # sample appropriate target sbp, dbp with group label (hypo, normal, ...)
         ori_y = sample_sbp_dbp(target_group, current_batch_size)
         sbp_label=(ori_y[:,0]-80)//10; dbp_label=(ori_y[:,1]-40)//10
         y = dataset._min_max_normalize(ori_y, dataset.label_max, dataset.label_min).to(device)
@@ -38,7 +38,6 @@ def generate_diffusion_sequence(args, data, dataset, device, diffusion, regresso
             guidance_kwargs={
                 "regressor": regressor,
                 "y": y,
-                # "g": torch.fill(torch.zeros(current_batch_size,), target_group).long().to(device),
                 "g": torch.stack((sbp_label, dbp_label), dim=1).long().to(device),
                 "regressor_scale": args.regressor_scale,
             }
@@ -47,10 +46,8 @@ def generate_diffusion_sequence(args, data, dataset, device, diffusion, regresso
         sampled_seq_list.append(sampled_seq)
     
     try:
-        # torch.cat 호출 부분
+        # save PPG signals and labels, respectively, for different group
         os.makedirs(sampling_dir, exist_ok=True)
-        # with open(f'{sampling_dir}/sample_{target_group}.pkl', 'wb') as f:
-        #     pickle.dump(torch.cat(sampled_seq_list, dim=0), f)
         result = {
             'sampled_seq': torch.cat(sampled_seq_list, dim=0),
             'y': torch.cat(ori_y_list, dim=0)
@@ -61,7 +58,6 @@ def generate_diffusion_sequence(args, data, dataset, device, diffusion, regresso
             pickle.dump(result, f)
             
     except RuntimeError as e:
-        # 문제가 발생했음을 알리는 파일 생성
         os.makedirs(sampling_dir, exist_ok=True)
         with open(f'{sampling_dir}/error_{target_group}.txt', 'w') as error_file:
             error_file.write(str(e))
@@ -79,11 +75,12 @@ def main(args):
     train_set_root = paths.TRAINSET_ROOT
     train_setting = f'fold_{args.train_fold}/seed_{args.seed}_sampling_method_{args.sampling_method}_num_samples_{args.num_samples}-'\
                       f'diffusion_time_steps_{args.diffusion_time_steps}-train_num_steps_{args.train_num_steps}_{args.benchmark}'
-    if not args.ignore_wandb:
-        wandb.init(project='check_train_time',
-                   entity='ppg-diffusion')
-        wandb_run_name = train_setting
-        wandb.run.name = wandb_run_name
+    
+    # can restore wandb if needed
+    # if not args.ignore_wandb:
+    #     wandb.init(project='diffusion main',entity='ppg-diffusion')
+    #     wandb_run_name = train_setting
+    #     wandb.run.name = wandb_run_name
 
     result_path = os.path.join(paths.WEIGHT_ROOT, train_setting)
     sampling_root = paths.SAMPLING_ROOT
@@ -98,16 +95,12 @@ def main(args):
     else:
         args.seq_length=625
     data_sampling_start = time.time()
-    # ppg, label = get_data(sampling_method=args.sampling_method,
-    #                              num_samples=args.num_samples,
-    #                              data_root=paths.DATA_ROOT,
-    #                              benchmark=args.benchmark)
     data = get_data(sampling_method='first_k',
                                     num_samples=5,
                                     data_root=paths.DATA_ROOT,
                                     benchmark=args.benchmark,
                                     train_fold=args.train_fold)
-    # data = get_data(benchmark=args.benchmark)
+    
     data_sampling_time = time.time() - data_sampling_start
     if not args.ignore_wandb:
         wandb.log({'n_sample': args.num_samples})
@@ -115,13 +108,10 @@ def main(args):
     print(f"data sampling finished, collapsed time: {data_sampling_time:.5f}")
     os.makedirs(train_set_root, exist_ok=True)
     
-    # with open(os.path.join(train_set_root, train_set_name), 'wb') as f:
-    #     pickle.dump(ppg, f)
-    
     tr_dataset = dataset = Dataset1D(data['train']['ppg'], label=data['train']['spdp'], groups=data['train']['group_label'] ,normalize=True)
     val_dataset = Dataset1D(data['valid']['ppg'], label=data['valid']['spdp'], groups=data['valid']['group_label'] ,normalize=True)
 
-    #----------------------------------- Create Model ------------------------------------
+    #----------------------------------- Create Diffusion Model ------------------------------------
 
     model = Unet1D(
         dim = 64,
@@ -139,11 +129,9 @@ def main(args):
         denorm_func = dataset.undo_normalization if args.min_max else None
     )
 
-    # resnet ------
+    #------------------------------------- Guidance Regressor Load --------------------------------------
     if not args.disable_guidance:
         model_path, args = get_reg_modelpath(args)
-        # model_path = f'/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/train-step_epoch_2000_diffuse_2000_wd_0.0001_eta_0.0_lr_0.0001_3_final_no_group_label_resnet_group_average_loss_erm.pt'
-        # regressor = ResNet1D(output_size=2, final_layers=args.final_layers).to(device)
         regressor = ResNet1D(output_size=2, final_layers=args.final_layers, n_block=8, 
                              disable_g=True, is_se=args.is_se, auxilary_classification=args.auxilary_classification,
                              do_rate=args.do_rate, seq_length=args.seq_length).to(device)
@@ -152,6 +140,7 @@ def main(args):
         regressor.load_state_dict(model_state_dict)
         regressor.eval()
         print("regressor model load complete")
+    
     #------------------------------------- Training --------------------------------------
     
     trainer = Trainer1D(
@@ -166,7 +155,7 @@ def main(args):
         results_folder = result_path
     )
     
-    if not args.sample_only and not os.path.exists(f'/mlainas/ETRI_2023/weights/fold_{args.train_fold}/seed_1000_sampling_method_first_k_num_samples_5-diffusion_time_steps_2000-train_num_steps_32_sensors/model-last.pt'):
+    if not args.sample_only and not os.path.exists(f'your diffusion model path here'):
         trainer.train()
         trainer.save('last')
     else:
@@ -187,10 +176,6 @@ def main(args):
         with open(f'{sampling_dir}/sample_{target_group}.pkl', 'wb') as f:
             pickle.dump(sampled_seq, f)
     print(f"Data sampled at {sampling_dir}")
-    #------------------------------------- Visualize --------------------------------------
-
-    if args.visualize:
-        visualize(sampling_dir, args.target_group, min_value=-0.1, max_value=0.5)
 
 if __name__ == '__main__':
 
@@ -200,23 +185,21 @@ if __name__ == '__main__':
     parser.add_argument("--device", type=str, default='cuda')
     parser.add_argument("--ignore_wandb", action='store_true',
         help = "Stop using wandb (Default : False)")
-    parser.add_argument("--visualize", action='store_true',
-        help = "Visualize results (Default : False)")
 
     ## DATA ----------------------------------------------------
     parser.add_argument("--num_samples", type=int, default=5)
-    parser.add_argument("--seq_length", type=int, default=625) #32660
+    parser.add_argument("--seq_length", type=int, default=625) # 625 for bcg and sensors, 262 for ppgbp
     parser.add_argument("--sampling_method", type=str, default='first_k')
     parser.add_argument("--train_batch_size", type=int, default=32)
     parser.add_argument("--min_max", action='store_false',
         help = "Min-Max normalize data (Default : True)")
     parser.add_argument("--benchmark", type=str, default='bcg')
-    parser.add_argument("--train_fold", type=int, default=-1)
+    parser.add_argument("--train_fold", type=int, default=-1) # -1 for sample all target group (hypo, normal, prehyper, hyper2)
     parser.add_argument("--channels", type=int, default=1)
 
     ## Model ---------------------------------------------------
     parser.add_argument("--disable_guidance", action='store_true',
-        help = "Stop using guidance (Default : False)")
+        help = "Stop using guidance (Default : False)") # sample without guidance
     parser.add_argument("--reg_train_loss", type=str, default='group_average_loss')
     parser.add_argument("--reg_selection_dataset", type=str, default='val')
     parser.add_argument("--reg_selection_loss", type=str, default='gal',  choices=["erm", "gal", "worst"])
@@ -235,13 +218,12 @@ if __name__ == '__main__':
     parser.add_argument("--sample_only", action='store_true',
         help = "Stop Training (Default : False)")
     parser.add_argument("--sample_batch_size", default=None)
-    # parser.add_argument("--target_label", type=float, default=1) # deprecated
     parser.add_argument("--target_group", type=int, default=-1, choices=[-1,0,1,2,3,4], 
                         help="-1(all) 0(hyp0) 1(normal) 2(perhyper) 3(hyper2) 4(crisis) (Default : 1 (normal))")
     parser.add_argument("--t_scheduling", type=str, default="uniform",  choices=["loss-second-moment", "uniform", "train-step"])
     parser.add_argument("--regressor_scale", type=float, default=1.0)
     parser.add_argument("--regressor_epoch", type=int, default=2000)
-    parser.add_argument("--gen_size", type=int, default=8096)
+    parser.add_argument("--gen_size", type=int, default=8096) # modify appropriate sample size
     args = parser.parse_args()
 
     main(args)

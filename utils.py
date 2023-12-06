@@ -11,25 +11,6 @@ from matplotlib import pyplot as plt
 import wandb
 import random
 
-def visualize(root, target_label, min_value, max_value):
-    plot_root = os.path.join(root, f'plot_results_target_{target_label}')
-    os.makedirs(plot_root, exist_ok=True)
-    sample_path = os.path.join(root, f'sample_{target_label}.pkl')
-    try:
-        with open(sample_path, 'rb') as f:
-            sample = pickle.load(f)
-            samples = sample.squeeze(1)
-            samples = samples.detach().cpu().numpy()
-            for i, sample in enumerate(samples):
-                plt_path = f'{plot_root}/{i}.png'
-                plt.plot(sample)
-                plt.ylim(min_value, max_value)  # Set the y-axis limits
-                plt.savefig(plt_path)
-                plt.cla()
-    except Exception as e:
-        print(e)
-
-
 def sample_sbp_dbp(target_group, batch_size, mode = "sample_each"):
     size = batch_size if mode == "sample_each" else 1
     if target_group == 0:#"hypo":
@@ -54,7 +35,8 @@ def sample_sbp_dbp(target_group, batch_size, mode = "sample_each"):
     if mode == "same":
         return torch.tensor([[sbp, dbp]] * batch_size)
     return torch.tensor(np.array([sbp, dbp]).T)
-    
+
+# return etri, aha grouping or same-range grouping label
 def assign_group_label(sbp, dbp, mode, r=10):
     if (sbp <= 80) or (sbp >= 180) or (dbp >= 120) or (dbp <= 40): # add crisis
         return None # eliminate from dataset
@@ -68,10 +50,11 @@ def assign_group_label(sbp, dbp, mode, r=10):
         elif (80 <= sbp) or (40 <= dbp):
             return 0 #"hypo"
     elif mode=="same":
-        sbp_label = (sbp - 80) // 10
-        dbp_label = (dbp - 40) // 10
+        sbp_label = (sbp - 80) // r
+        dbp_label = (dbp - 40) // r
         return (sbp_label, dbp_label)
-    
+
+# same-range label to etri,aha grouping label
 def same_to_group(same):   
     new_group=[]
     for a in same:
@@ -86,27 +69,16 @@ def same_to_group(same):
             new_group.append(0) #"hypo"
     return torch.tensor(new_group)
 
-
-
-
-def print_group_counts(group_labels):
-    group_names = {0: "undefined", 1: "hypo", 2: "normal", 3: "prehyper", 4: "hyper2", 5: "crisis"}
-    group_counts = defaultdict(int, Counter(group_labels))
-    print("Group       | Count")
-    print("------------|-------")
-    for group_id, group_name in group_names.items():
-        count = group_counts[group_id]
-        print(f"{group_name.ljust(12)}| {count}")
-
 def get_data(sampling_method='first_k',
              num_samples=5,
              data_root='./',
              benchmark='bcg',
              train_fold = 0,
-             group_mode="same",
-             d500_idx=0):
+             group_mode="same"):
     
     if benchmark=='bcg' or benchmark=='ppgbp' or benchmark=='sensors':
+        # bp benchmark uses cross validation
+        # this function retrun appropriate data sets, which is fit for bp cross validation setting
         if train_fold == 0:
             fold_nums = [0,1,4]
             val_fold = 3
@@ -140,37 +112,32 @@ def get_data(sampling_method='first_k',
         return data
 
     #--------------------------------------------------------------------------------------
-    
-    elif benchmark == 'etri':
-        assert sampling_method in ['first_k']
+    # used for p09 dataset, not for bp benchmark
+    # elif benchmark == 'etri':
+    #     assert sampling_method in ['first_k']
 
-        col_names = ['time', 'PPG', 'abp']
-        sample_list = []
+    #     col_names = ['time', 'PPG', 'abp']
+    #     sample_list = []
 
-        if sampling_method == 'first_k':
-            for patient_id in sorted(os.listdir(data_root)):
-                patient_dir = os.path.join(data_root, patient_id)
+    #     if sampling_method == 'first_k':
+    #         for patient_id in sorted(os.listdir(data_root)):
+    #             patient_dir = os.path.join(data_root, patient_id)
 
-                for signal_name in sorted(os.listdir(patient_dir))[:num_samples]:
-                    sample = pd.read_csv(f'{os.path.join(patient_dir, signal_name)}', names=col_names)
-                    sample_tensor = torch.tensor(sample['PPG'].values)
-                    sample_list.append(sample_tensor)
+    #             for signal_name in sorted(os.listdir(patient_dir))[:num_samples]:
+    #                 sample = pd.read_csv(f'{os.path.join(patient_dir, signal_name)}', names=col_names)
+    #                 sample_tensor = torch.tensor(sample['PPG'].values)
+    #                 sample_list.append(sample_tensor)
 
-        len_seq = len(sample_list)
-        training_seq = torch.stack(sample_list).unsqueeze(1).half()
+    #     len_seq = len(sample_list)
+    #     training_seq = torch.stack(sample_list).unsqueeze(1).half()
         
         return training_seq, len_seq
-    
-    #--------------------------------------------------------------------------------------
-    
-    elif benchmark == 'd500':
-        return torch.load(f'/data1/bubble3jh/ppg/data/six_ch/d500_sliced_{d500_idx}.pth')
     
 def fold_data(fold_nums, group_mode, dataset='bcg'):
     ppgs, spdps, group_labels = [], [], []
     count = 0
     for fold_num in fold_nums:
-        ppg, spdp = load_fold_np(fold_num=fold_num, root=f'/mlainas/ETRI_2023/splitted/{dataset}_dataset')
+        ppg, spdp = load_fold_np(fold_num=fold_num, root=f'your dataset root here/{dataset}_dataset')
         ppg = torch.permute(ppg, (1,0,2))
         sbp = spdp[0, :, 0].squeeze()
         dbp = spdp[1, :, 0].squeeze()
@@ -183,11 +150,10 @@ def fold_data(fold_nums, group_mode, dataset='bcg'):
                 group_labels.append(group_label)
             else:
                 count = count + 1
-    # print_group_counts(group_labels)
     print(f"{count} datas eliminated.\n")
     return torch.cat(ppgs, dim=0).unsqueeze(1).half(), torch.stack(spdps, dim=0).float(), torch.tensor(group_labels)
 
-def load_fold_np(fold_num, root='/mlainas/ETRI_2023/splitted/bcg_dataset'):
+def load_fold_np(fold_num, root='your data root here'):
     if os.path.exists(f'{root}/signal_fold_{fold_num}_ppg.npy'):
         return torch.from_numpy(np.load(f'{root}/signal_fold_{fold_num}_ppg.npy')), torch.from_numpy(np.load(f'{root}/signal_fold_{fold_num}_spdp.npy'))
     else:
@@ -200,16 +166,17 @@ def load_fold_np(fold_num, root='/mlainas/ETRI_2023/splitted/bcg_dataset'):
         np.save(f'{root}/signal_fold_{fold_num}_ppg.npy', ppg_numpy_data)   
         return torch.from_numpy(ppg_numpy_data), torch.from_numpy(spdp_numpy_data)
 
-def get_sample_batch_size(data, target_group):
-    group_label = same_to_group(data['train']['group_label'])
-    unique_elements, counts = torch.unique(group_label, return_counts=True)
+# deprecated, but can use for minimum sampling with max count scaling method 
+# def get_sample_batch_size(data, target_group):
+#     group_label = same_to_group(data['train']['group_label'])
+#     unique_elements, counts = torch.unique(group_label, return_counts=True)
 
-    max_count = torch.max(counts).item()
+#     max_count = torch.max(counts).item()
     
-    target_count = counts[unique_elements == target_group].item() if target_group in unique_elements else 0
-    print(f"max count : {max_count}, target count : {target_count}")
+#     target_count = counts[unique_elements == target_group].item() if target_group in unique_elements else 0
+#     print(f"max count : {max_count}, target count : {target_count}")
     
-    return max_count - target_count
+#     return max_count - target_count
 
 class Lambda(nn.Module):
     def __init__(self, func):
@@ -220,114 +187,10 @@ class Lambda(nn.Module):
         return self.func(x)
     
 def get_reg_modelpath(args):
+    # We used best group avg loss for best regressor model
+    # This function return best hyper parameter setting for guidance regressor, which needed at sampling phase.
+    root = "your regressor model root here"
     if args.benchmark == "bcg":
-        if args.reg_selection_loss == "worst":
-            if args.train_fold == 0:
-                args.t_scheduling = "train-step"
-                args.g_mlp_layers = 2
-                args.final_layers = 4
-                args.eta_min = 0.001
-                args.init_lr = 0.0001
-                args.g_pos = "front"
-                args.concat_label_mlp = False
-                args.weight_decay = 0.0001
-
-            elif args.train_fold == 1:
-                args.t_scheduling = "train-step"
-                args.g_mlp_layers = 4
-                args.final_layers = 4
-                args.eta_min = 0.001
-                args.init_lr = 0.0001
-                args.g_pos = "rear"
-                args.concat_label_mlp = True
-                args.weight_decay = 0.001
-
-            elif args.train_fold == 2:
-                args.t_scheduling = "train-step"
-                args.g_mlp_layers = 2
-                args.final_layers = 4
-                args.eta_min = 0.001
-                args.init_lr = 0.0001
-                args.g_pos = "rear"
-                args.concat_label_mlp = True
-                args.weight_decay = 0.0001
-
-            elif args.train_fold == 3:
-                args.t_scheduling = "uniform"
-                args.g_mlp_layers = 4
-                args.final_layers = 4
-                args.eta_min = 0.01
-                args.init_lr = 0.001
-                args.g_pos = "front"
-                args.concat_label_mlp = False
-                args.weight_decay = 0.0001
-
-            elif args.train_fold == 4:
-                args.t_scheduling = "train-step"
-                args.g_mlp_layers = 4
-                args.final_layers = 4
-                args.eta_min = 0.01
-                args.init_lr = 0.00001
-                args.g_pos = "rear"
-                args.concat_label_mlp = True
-                args.weight_decay = 0.001
-
-
-        # best erm val
-        if args.reg_selection_loss == "erm":
-            if args.train_fold == 0:
-                args.t_scheduling = "train-step"
-                args.g_mlp_layers = 2
-                args.final_layers = 12
-                args.eta_min = 0.01
-                args.init_lr = 0.00001
-                args.g_pos = "rear"
-                args.concat_label_mlp = True
-                args.weight_decay = 0.001
-
-            elif args.train_fold == 1:
-                args.t_scheduling = "train-step"
-                args.g_mlp_layers = 4
-                args.final_layers = 4
-                args.eta_min = 0.001
-                args.init_lr = 0.0001
-                args.g_pos = "rear"
-                args.concat_label_mlp = True
-                args.weight_decay = 0.001
-
-            elif args.train_fold == 2:
-                args.t_scheduling = "train-step"
-                args.g_mlp_layers = 2
-                args.final_layers = 4
-                args.eta_min = 0.001
-                args.init_lr = 0.001
-                args.g_pos = "rear"
-                args.concat_label_mlp = True
-                args.weight_decay = 0.0001
-
-            elif args.train_fold == 3:
-                args.t_scheduling = "train-step"
-                args.g_mlp_layers = 2
-                args.final_layers = 12
-                args.eta_min = 0.001
-                args.init_lr = 0.00001
-                args.g_pos = "rear"
-                args.concat_label_mlp = False
-                args.weight_decay = 0.0001
-
-            elif args.train_fold == 4:
-                args.t_scheduling = "train-step"
-                args.g_mlp_layers = 2
-                args.final_layers = 3
-                args.eta_min = 0.01
-                args.init_lr = 0.0001
-                args.g_pos = "rear"
-                args.concat_label_mlp = True
-                args.weight_decay = 0.1
-
-
-        # best gal val
-
         if args.reg_selection_loss == "gal":
             if args.train_fold == 0:
                 args.t_scheduling = "train-step"
@@ -386,10 +249,9 @@ def get_reg_modelpath(args):
 
         # group average loss trained model load
         if args.reg_selection_dataset == "val":
-            # model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_cat_{str(args.concat_label_mlp)}_resnet_{args.reg_train_loss}_{args.reg_selection_loss}.pt" # test best model로 변경
-            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/train-step_epoch_2000_diffuse_2000_wd_{args.weight_decay}_do_rate_{args.do_rate}_loss_{args.loss}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_no_group_label_timelayer_MLP_is_se_{str(args.is_se)}_auxilary_classifcation_{str(args.auxilary_classification)}_last_resnet_{args.reg_selection_loss}.pt"
+            model_path = f"{root}/reg_model/fold_{args.train_fold}/train-step_epoch_2000_diffuse_2000_wd_{args.weight_decay}_do_rate_{args.do_rate}_loss_{args.loss}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_no_group_label_timelayer_MLP_is_se_{str(args.is_se)}_auxilary_classifcation_{str(args.auxilary_classification)}_last_resnet_{args.reg_selection_loss}.pt"
         elif args.reg_selection_dataset == "last":
-            model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_cat_{str(args.concat_label_mlp)}_last_resnet_{args.reg_selection_loss}.pt" # test best model로 변경
+            model_path = f"{root}/reg_model/fold_{args.train_fold}/{args.t_scheduling}_epoch_{args.regressor_epoch}_diffuse_{args.diffusion_time_steps}_wd_{args.weight_decay}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_g_{args.g_mlp_layers}_layer_g_pos{args.g_pos}_cat_{str(args.concat_label_mlp)}_last_resnet_{args.reg_selection_loss}.pt" # test best model로 변경
     
 # --------------------------------- ppgbp -----------------------------------------------
     elif args.benchmark == "ppgbp":
@@ -450,8 +312,8 @@ def get_reg_modelpath(args):
                 args.auxilary_classification = True
         else:
             raise(f"model selection must be GAL in {args.benchmark} dataset")
-                                                                        #    train-step_diffuse_2000_wd_0.001_do_rate_0.7_loss_group_average_loss_eta_0.001_lr_0.001_3_final_no_group_label_timelayer_MLP_is_se_True_ppgbp_resnet_group_average_loss_gal.pt
-        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/train-step_diffuse_2000_wd_{args.weight_decay}_do_rate_{args.do_rate}_loss_{args.loss}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_no_group_label_timelayer_MLP_is_se_{str(args.is_se)}_{args.benchmark}_resnet_{args.loss}_{args.reg_selection_loss}.pt"
+    
+        model_path = f"{root}/reg_model/fold_{args.train_fold}/train-step_diffuse_2000_wd_{args.weight_decay}_do_rate_{args.do_rate}_loss_{args.loss}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_no_group_label_timelayer_MLP_is_se_{str(args.is_se)}_{args.benchmark}_resnet_{args.loss}_{args.reg_selection_loss}.pt"
 
 # --------------------------------- sensors -----------------------------------------------
     elif args.benchmark == "sensors":
@@ -512,7 +374,7 @@ def get_reg_modelpath(args):
                 args.auxilary_classification = True
         else:
             raise(f"model selection must be GAL in {args.benchmark} dataset")
-        model_path = f"/mlainas/ETRI_2023/reg_model/fold_{args.train_fold}/train-step_diffuse_2000_wd_{args.weight_decay}_do_rate_{args.do_rate}_loss_{args.loss}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_no_group_label_timelayer_MLP_is_se_{str(args.is_se)}_{args.benchmark}_resnet_{args.loss}_{args.reg_selection_loss}.pt"
+        model_path = f"{root}/reg_model/fold_{args.train_fold}/train-step_diffuse_2000_wd_{args.weight_decay}_do_rate_{args.do_rate}_loss_{args.loss}_eta_{args.eta_min}_lr_{args.init_lr}_{args.final_layers}_final_no_group_label_timelayer_MLP_is_se_{str(args.is_se)}_{args.benchmark}_resnet_{args.loss}_{args.reg_selection_loss}.pt"
     return model_path, args
 
 # Batch-wise MAE 계산 함수
@@ -561,18 +423,6 @@ def log_global_metrics(args, overall_mae_sbp_list, overall_mae_dbp_list, mae_sbp
     # Calculate and log overall MAE for SBP and DBP
     overall_mae_sbp = sum(overall_mae_sbp_list) / len(overall_mae_sbp_list)
     overall_mae_dbp = sum(overall_mae_dbp_list) / len(overall_mae_dbp_list)
-    
-    # print(f"{phase} Overall Mean MAE_SBP: {overall_mae_sbp}")
-    # print(f"{phase} Overall Mean MAE_DBP: {overall_mae_dbp}")
-
-    # Calculate and log MAE for each group
-    for group, values in mae_sbp_lists.items():
-        group_mae_sbp = sum(values) / len(values)
-        # print(f"{phase} Mean MAE_SBP for group {group}: {group_mae_sbp}")
-
-    for group, values in mae_dbp_lists.items():
-        group_mae_dbp = sum(values) / len(values)
-        # print(f"{phase} Mean MAE_DBP for group {group}: {group_mae_dbp}")
 
     # Logging to Weights and Biases (wandb) if it's not ignored
     if not args.ignore_wandb:
