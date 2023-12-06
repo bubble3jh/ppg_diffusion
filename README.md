@@ -1,334 +1,146 @@
-<img src="./images/denoising-diffusion.png" width="500px"></img>
+# Data Augmentation of PPG Signals Through Guided Diffusion
 
-## Denoising Diffusion Probabilistic Model, in Pytorch
+This repository contains PyTorch implemenations of Data Augmentation of PPG Signals Through Guided Diffusion by Python.
 
-Implementation of <a href="https://arxiv.org/abs/2006.11239">Denoising Diffusion Probabilistic Model</a> in Pytorch. It is a new approach to generative modeling that may <a href="https://ajolicoeur.wordpress.com/the-new-contender-to-gans-score-matching-with-langevin-sampling/">have the potential</a> to rival GANs. It uses denoising score matching to estimate the gradient of the data distribution, followed by Langevin sampling to sample from the true distribution.
+<img src="./images/flowchart.png" width="500px"></img>
 
-This implementation was transcribed from the official Tensorflow version <a href="https://github.com/hojonathanho/diffusion">here</a>
+## Introduction
+This is a machine learning code that uses coronavirus cluster data to predict how many people each cluster will infect and how long the cluster will last. 
+For the layer that embeds each information, there are two layers: a layer that processes cluster information (e.g., severity index etc.) and a layer that processes patient information (e.g., age, address, etc.).
+For the Transformer model, we used a sequence of dates for each cluster and performed a regression using the correlation of each sequence.
 
-Youtube AI Educators - <a href="https://www.youtube.com/watch?v=W-O7AZNzbzQ">Yannic Kilcher</a> | <a href="https://www.youtube.com/watch?v=344w5h24-h8">AI Coffeebreak with Letitia</a> | <a href="https://www.youtube.com/watch?v=HoKDTa5jHvg">Outlier</a>
-
-<a href="https://github.com/yiyixuxu/denoising-diffusion-flax">Flax implementation</a> from <a href="https://github.com/yiyixuxu">YiYi Xu</a>
-
-<a href="https://huggingface.co/blog/annotated-diffusion">Annotated code</a> by Research Scientists / Engineers from <a href="https://huggingface.co/">🤗 Huggingface</a>
-
-Update: Turns out none of the technicalities really matters at all | <a href="https://arxiv.org/abs/2208.09392">"Cold Diffusion" paper</a> | <a href="https://muse-model.github.io/">Muse</a>
-
-<img src="./images/sample.png" width="500px"><img>
-
-[![PyPI version](https://badge.fury.io/py/denoising-diffusion-pytorch.svg)](https://badge.fury.io/py/denoising-diffusion-pytorch)
-
-## Install
-
-```bash
-$ pip install denoising_diffusion_pytorch
+### Project Tree
+```
+├── data
+│   ├── data_cut_0.csv
+│   ├── data_cut_1.csv
+│   ├── data_cut_2.csv
+│   ├── data_cut_3.csv
+│   ├── data_cut_4.csv
+│   ├── data_cut_5.csv
+│   ├── data_final_mod.csv
+│   ├── data_mod.ipynb
+│   └── data_task.csv
+├── sh
+│   ├── linear_raw.sh
+│   ├── linear.sh
+│   ├── mlp_raw.sh
+│   ├── mlp.sh
+│   ├── ridge_raw.sh
+│   ├── ridge.sh
+│   └── transformer.sh
+├── main.py
+├── ml_algorithm.py
+├── models.py
+├── utils.py
+└── README.md
 ```
 
-## Usage
+For our experiments, we divided the dataset according to how observable the dynamics were. For example, if we observed a cluster until day 2 and predicted the duration of the cluster and additional patients for the remaining days, we would have ``` ./data/data_cut_2.csv ```. This generated a dataset of 5 days, which we combined into ``` data_cut_0.csv ``` and used in the experiment. The data preprocessing method is documented in ```data_mod.ipynb```.
 
-```python
-import torch
-from denoising_diffusion_pytorch import Unet, GaussianDiffusion
+Also, for hyperparameter sweeping, we used files located in ```./sh ```.
 
-model = Unet(
-    dim = 64,
-    dim_mults = (1, 2, 4, 8),
-    flash_attn = True
-)
+## Implementation
 
-diffusion = GaussianDiffusion(
-    model,
-    image_size = 128,
-    timesteps = 1000    # number of steps
-)
-
-training_images = torch.rand(8, 3, 128, 128) # images are normalized from 0 to 1
-loss = diffusion(training_images)
-loss.backward()
-
-# after a lot of training
-
-sampled_images = diffusion.sample(batch_size = 4)
-sampled_images.shape # (4, 3, 128, 128)
+We used the following Python packages for core development. We tested on `Python 3.10.10`.
+```
+pytorch                   2.0.0
+pandas                    2.0.0
+numpy                     1.23.5
+scikit-learn              1.2.2
+scipy                     1.10.1
 ```
 
-Or, if you simply want to pass in a folder name and the desired image dimensions, you can use the `Trainer` class to easily train a model.
+### Arg Parser
 
-```python
-from denoising_diffusion_pytorch import Unet, GaussianDiffusion, Trainer
+The script `main.py` allows to train and evaluate all the baselines we consider.
 
-model = Unet(
-    dim = 64,
-    dim_mults = (1, 2, 4, 8),
-    flash_attn = True
-)
-
-diffusion = GaussianDiffusion(
-    model,
-    image_size = 128,
-    timesteps = 1000,           # number of steps
-    sampling_timesteps = 250    # number of sampling timesteps (using ddim for faster inference [see citation for ddim paper])
-)
-
-trainer = Trainer(
-    diffusion,
-    'path/to/your/images',
-    train_batch_size = 32,
-    train_lr = 8e-5,
-    train_num_steps = 700000,         # total training steps
-    gradient_accumulate_every = 2,    # gradient accumulation steps
-    ema_decay = 0.995,                # exponential moving average decay
-    amp = True,                       # turn on mixed precision
-    calculate_fid = True              # whether to calculate fid during training
-)
-
-trainer.train()
+To train proposed methods use this:
 ```
-
-Samples and model checkpoints will be logged to `./results` periodically
-
-## Multi-GPU Training
-
-The `Trainer` class is now equipped with <a href="https://huggingface.co/docs/accelerate/accelerator">🤗 Accelerator</a>. You can easily do multi-gpu training in two steps using their `accelerate` CLI
-
-At the project root directory, where the training script is, run
-
-```python
-$ accelerate config
+main.py --epochs=<EPOCHS>                      \
+        --model=<MODEL>                        \
+        --num_features=<NUM_FEATURES>          \
+        --hidden_dim=<HIDEN_DIM>               \
+        --num_layers=<NUM_LAYERS>              \
+        --num_heads=<NUM_HEADS>                \
+        [--disable_embedding]                  \
+        --wd=<WD>                              \
+        --lr_init=<LR_INIT>                    \
+        --drop_out=<DROP_OUT>                  \
+        --lamb=<LAMB>                          \
+        --scheduler=<SCHEDULAR>                \
+        --t_max=<T_MAX>                        \
+        [--ignore_wandb]
 ```
+Parameters:
+* ```EPOCHS``` &mdash; number of training epochs (default: 300)
+* ```MODEL``` &mdash; model name (default: transformer) :
+    - transformer
+    - linear
+    - ridge
+    - mlp
+    - svr
+    - rfr
+* ```NUM_FEATURES``` &mdash; feature size (default : 128)
+* ```HIDEN_DIM``` &mdash; DL model hidden size (default : 64)
+* ```NUM_LAYERS``` &mdash; DL model layer num (default : 3)
+* ```NUM_HEADS``` &mdash; Transformer model head num (default : 2)
+* ```--disable_embedding``` &mdash; Disable embedding to use raw data 
+* ```WD``` &mdash; weight decay (default: 5e-4)
+* ```LR_INIT``` &mdash; initial learning rate (default: 0.005)
+* ```DROP_OUT``` &mdash; dropout rate (default: 0.0)
+* ```LAMB``` &mdash; Penalty term for Ridge Regression (Default : 0)
+* ```scheduler``` &mdash; schedular (default: constant) :
+    - constant
+    - cos_anneal
+* ```t_max``` &mdash; T_max for Cosine Annealing Learning Rate Scheduler (Default : 300)
+* ```--ignore_wandb``` &mdash; Ignore WandB to do not save results
 
-Then, in the same directory
+----
 
-```python
-$ accelerate launch train.py
+### Train Models
+
+To train model for example, use this:
+
 ```
+# linear
+python3 main.py --model=linear --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=200 --scheduler=cos_anneal --t_max=200 
 
-## Miscellaneous
+# mlp
+python3 main.py --model=mlp --hidden_dim=128 --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=200 --scheduler=cos_anneal --t_max=200 --drop_out=0.1 --num_layers=3
 
-### 1D Sequence
-
-By popular request, a 1D Unet + Gaussian Diffusion implementation.
-
-```python
-import torch
-from denoising_diffusion_pytorch import Unet1D, GaussianDiffusion1D, Trainer1D, Dataset1D
-
-model = Unet1D(
-    dim = 64,
-    dim_mults = (1, 2, 4, 8),
-    channels = 32
-)
-
-diffusion = GaussianDiffusion1D(
-    model,
-    seq_length = 128,
-    timesteps = 1000,
-    objective = 'pred_v'
-)
-
-training_seq = torch.rand(64, 32, 128) # features are normalized from 0 to 1
-dataset = Dataset1D(training_seq)  # this is just an example, but you can formulate your own Dataset and pass it into the `Trainer1D` below
-
-loss = diffusion(training_seq)
-loss.backward()
-
-# Or using trainer
-
-trainer = Trainer1D(
-    diffusion,
-    dataset = dataset,
-    train_batch_size = 32,
-    train_lr = 8e-5,
-    train_num_steps = 700000,         # total training steps
-    gradient_accumulate_every = 2,    # gradient accumulation steps
-    ema_decay = 0.995,                # exponential moving average decay
-    amp = True,                       # turn on mixed precision
-)
-trainer.train()
-
-# after a lot of training
-
-sampled_seq = diffusion.sample(batch_size = 4)
-sampled_seq.shape # (4, 32, 128)
+# transformer
+python3 main.py --model=transformer --hidden_dim=128 --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=200 --scheduler=cos_anneal --t_max=200 --drop_out=0.1 --num_layers=2 --num_heads=2
 
 ```
 
-`Trainer1D` does not evaluate the generated samples in any way since the type of data is not known.
+If you want to sweep model to search best hyperparameter, you can use this:
 
-You could consider adding a suitable metric to the training loop yourself after doing an editable install of this package
-`pip install -e .`.
+```
+# linear
+bash sh/linear.sh
 
-## Citations
+# mlp
+bash sh/mlp.sh 
 
-```bibtex
-@inproceedings{NEURIPS2020_4c5bcfec,
-    author      = {Ho, Jonathan and Jain, Ajay and Abbeel, Pieter},
-    booktitle   = {Advances in Neural Information Processing Systems},
-    editor      = {H. Larochelle and M. Ranzato and R. Hadsell and M.F. Balcan and H. Lin},
-    pages       = {6840--6851},
-    publisher   = {Curran Associates, Inc.},
-    title       = {Denoising Diffusion Probabilistic Models},
-    url         = {https://proceedings.neurips.cc/paper/2020/file/4c5bcfec8584af0d967f1ab10179ca4b-Paper.pdf},
-    volume      = {33},
-    year        = {2020}
-}
+# transformer
+bash sh/transformer.sh
+
 ```
 
-```bibtex
-@InProceedings{pmlr-v139-nichol21a,
-    title       = {Improved Denoising Diffusion Probabilistic Models},
-    author      = {Nichol, Alexander Quinn and Dhariwal, Prafulla},
-    booktitle   = {Proceedings of the 38th International Conference on Machine Learning},
-    pages       = {8162--8171},
-    year        = {2021},
-    editor      = {Meila, Marina and Zhang, Tong},
-    volume      = {139},
-    series      = {Proceedings of Machine Learning Research},
-    month       = {18--24 Jul},
-    publisher   = {PMLR},
-    pdf         = {http://proceedings.mlr.press/v139/nichol21a/nichol21a.pdf},
-    url         = {https://proceedings.mlr.press/v139/nichol21a.html},
-}
+It should be modified for appropriate parameters for personal sweeping
+
+### Evaluate Models
+
+To test model, use this:
+```
+# linear
+python3 main.py --model=linear --hidden_dim=128 --eval_model=<MODEL_PATH>
+
+# mlp
+python3 main.py --model=mlp --hidden_dim=128 --num_layers=3 --eval_model=<MODEL_PATH>
+
+# transformer
+python3 main.py --model=transformer --hidden_dim=128 --num_layers=2 --num_heads=2 --eval_model=<MODEL_PATH>
 ```
 
-```bibtex
-@inproceedings{kingma2021on,
-    title       = {On Density Estimation with Diffusion Models},
-    author      = {Diederik P Kingma and Tim Salimans and Ben Poole and Jonathan Ho},
-    booktitle   = {Advances in Neural Information Processing Systems},
-    editor      = {A. Beygelzimer and Y. Dauphin and P. Liang and J. Wortman Vaughan},
-    year        = {2021},
-    url         = {https://openreview.net/forum?id=2LdBqxc1Yv}
-}
-```
-
-```bibtex
-@article{Karras2022ElucidatingTD,
-    title   = {Elucidating the Design Space of Diffusion-Based Generative Models},
-    author  = {Tero Karras and Miika Aittala and Timo Aila and Samuli Laine},
-    journal = {ArXiv},
-    year    = {2022},
-    volume  = {abs/2206.00364}
-}
-```
-
-```bibtex
-@article{Song2021DenoisingDI,
-    title   = {Denoising Diffusion Implicit Models},
-    author  = {Jiaming Song and Chenlin Meng and Stefano Ermon},
-    journal = {ArXiv},
-    year    = {2021},
-    volume  = {abs/2010.02502}
-}
-```
-
-```bibtex
-@misc{chen2022analog,
-    title   = {Analog Bits: Generating Discrete Data using Diffusion Models with Self-Conditioning},
-    author  = {Ting Chen and Ruixiang Zhang and Geoffrey Hinton},
-    year    = {2022},
-    eprint  = {2208.04202},
-    archivePrefix = {arXiv},
-    primaryClass = {cs.CV}
-}
-```
-
-```bibtex
-@article{Salimans2022ProgressiveDF,
-    title   = {Progressive Distillation for Fast Sampling of Diffusion Models},
-    author  = {Tim Salimans and Jonathan Ho},
-    journal = {ArXiv},
-    year    = {2022},
-    volume  = {abs/2202.00512}
-}
-```
-
-```bibtex
-@article{Ho2022ClassifierFreeDG,
-    title   = {Classifier-Free Diffusion Guidance},
-    author  = {Jonathan Ho},
-    journal = {ArXiv},
-    year    = {2022},
-    volume  = {abs/2207.12598}
-}
-```
-
-```bibtex
-@article{Sunkara2022NoMS,
-    title   = {No More Strided Convolutions or Pooling: A New CNN Building Block for Low-Resolution Images and Small Objects},
-    author  = {Raja Sunkara and Tie Luo},
-    journal = {ArXiv},
-    year    = {2022},
-    volume  = {abs/2208.03641}
-}
-```
-
-```bibtex
-@inproceedings{Jabri2022ScalableAC,
-    title   = {Scalable Adaptive Computation for Iterative Generation},
-    author  = {A. Jabri and David J. Fleet and Ting Chen},
-    year    = {2022}
-}
-```
-
-```bibtex
-@article{Cheng2022DPMSolverPlusPlus,
-    title   = {DPM-Solver++: Fast Solver for Guided Sampling of Diffusion Probabilistic Models},
-    author  = {Cheng Lu and Yuhao Zhou and Fan Bao and Jianfei Chen and Chongxuan Li and Jun Zhu},
-    journal = {NeuRips 2022 Oral},
-    year    = {2022},
-    volume  = {abs/2211.01095}
-}
-```
-
-```bibtex
-@inproceedings{Hoogeboom2023simpleDE,
-    title   = {simple diffusion: End-to-end diffusion for high resolution images},
-    author  = {Emiel Hoogeboom and Jonathan Heek and Tim Salimans},
-    year    = {2023}
-}
-```
-
-```bibtex
-@misc{https://doi.org/10.48550/arxiv.2302.01327,
-    doi     = {10.48550/ARXIV.2302.01327},
-    url     = {https://arxiv.org/abs/2302.01327},
-    author  = {Kumar, Manoj and Dehghani, Mostafa and Houlsby, Neil},
-    title   = {Dual PatchNorm},
-    publisher = {arXiv},
-    year    = {2023},
-    copyright = {Creative Commons Attribution 4.0 International}
-}
-```
-
-```bibtex
-@inproceedings{Hang2023EfficientDT,
-    title   = {Efficient Diffusion Training via Min-SNR Weighting Strategy},
-    author  = {Tiankai Hang and Shuyang Gu and Chen Li and Jianmin Bao and Dong Chen and Han Hu and Xin Geng and Baining Guo},
-    year    = {2023}
-}
-```
-
-```bibtex
-@misc{Guttenberg2023,
-    author  = {Nicholas Guttenberg},
-    url     = {https://www.crosslabs.org/blog/diffusion-with-offset-noise}
-}
-```
-
-```bibtex
-@inproceedings{Lin2023CommonDN,
-    title   = {Common Diffusion Noise Schedules and Sample Steps are Flawed},
-    author  = {Shanchuan Lin and Bingchen Liu and Jiashi Li and Xiao Yang},
-    year    = {2023}
-}
-```
-
-```bibtex
-@inproceedings{dao2022flashattention,
-    title   = {Flash{A}ttention: Fast and Memory-Efficient Exact Attention with {IO}-Awareness},
-    author  = {Dao, Tri and Fu, Daniel Y. and Ermon, Stefano and Rudra, Atri and R{\'e}, Christopher},
-    booktitle = {Advances in Neural Information Processing Systems},
-    year    = {2022}
-}
-```
